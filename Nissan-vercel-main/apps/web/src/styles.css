@@ -1,0 +1,222 @@
+@import url('https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700;800&family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Geist+Mono:wght@400;500&display=swap');
+@import 'tailwindcss';
+
+@custom-variant dark (&:is(.dark *));
+
+/*
+  ADIP "Dealer Intelligence OS" — command-center theme.
+  Refined enterprise: soft near-white canvas, deep-ink sidebar, sharp brand accent.
+  --brand is set per tenant (tenants.branding.primary_color) at the shell root.
+*/
+:root {
+  --brand: #c3002f; /* Nissan red — default; overridden per tenant */
+  --brand-foreground: #ffffff;
+
+  --background: oklch(0.991 0.002 95);
+  --foreground: oklch(0.23 0.02 264);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.23 0.02 264);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.23 0.02 264);
+  --primary: oklch(0.24 0.024 264);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.968 0.003 250);
+  --secondary-foreground: oklch(0.24 0.024 264);
+  --muted: oklch(0.967 0.003 250);
+  --muted-foreground: oklch(0.52 0.018 260);
+  --accent: oklch(0.966 0.004 250);
+  --accent-foreground: oklch(0.24 0.024 264);
+  --destructive: oklch(0.585 0.22 27);
+  --destructive-foreground: oklch(0.985 0 0);
+  --border: oklch(0.916 0.004 260);
+  --input: oklch(0.916 0.004 260);
+  --ring: oklch(0.6 0.02 264);
+
+  --success: oklch(0.62 0.14 158);
+  --warning: oklch(0.74 0.15 70);
+  --info: oklch(0.62 0.13 235);
+
+  --chart-1: oklch(0.62 0.2 27);
+  --chart-2: oklch(0.6 0.12 185);
+  --chart-3: oklch(0.5 0.12 250);
+  --chart-4: oklch(0.78 0.16 75);
+  --chart-5: oklch(0.62 0.14 158);
+
+  --radius: 0.8rem;
+
+  --sidebar: oklch(0.218 0.032 266);
+  --sidebar-foreground: oklch(0.78 0.018 266);
+  --sidebar-primary: var(--brand);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.27 0.035 266);
+  --sidebar-accent-foreground: oklch(0.98 0 0);
+  --sidebar-border: oklch(0.3 0.03 266);
+  --sidebar-ring: oklch(0.5 0.04 266);
+
+  --font-sans: 'Hanken Grotesk', ui-sans-serif, system-ui, sans-serif;
+  --font-display: 'Fraunces', Georgia, serif;
+  --font-mono: 'Geist Mono', ui-monospace, monospace;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-brand: var(--brand);
+  --color-brand-foreground: var(--brand-foreground);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-info: var(--info);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+
+  --font-sans: var(--font-sans);
+  --font-display: var(--font-display);
+  --font-mono: var(--font-mono);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/40;
+  }
+  html,
+  body,
+  #app {
+    min-height: 100%;
+  }
+  body {
+    margin: 0;
+    background-color: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    font-feature-settings: 'ss01', 'cv01';
+  }
+}
+
+/* ---- utilities ---- */
+.font-display {
+  font-family: var(--font-display);
+  letter-spacing: -0.01em;
+}
+.num {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+.kicker {
+  text-transform: uppercase;
+  letter-spacing: 0.13em;
+  font-weight: 700;
+  font-size: 0.66rem;
+}
+.brand-text {
+  color: var(--brand);
+}
+.brand-bg {
+  background-color: var(--brand);
+  color: var(--brand-foreground);
+}
+.input {
+  width: 100%;
+  height: 2.6rem;
+  border-radius: 0.6rem;
+  border: 1px solid var(--border);
+  background: var(--card);
+  padding: 0 0.85rem;
+  font-size: 0.875rem;
+  color: var(--foreground);
+  transition: border-color 160ms ease, box-shadow 160ms ease;
+}
+.input:focus {
+  outline: none;
+  border-color: var(--ring);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--ring) 18%, transparent);
+}
+
+/* Soft layered card shadow for the light canvas */
+.shadow-card {
+  box-shadow:
+    0 1px 2px rgba(16, 24, 40, 0.04),
+    0 8px 24px -12px rgba(16, 24, 40, 0.12);
+}
+.shadow-float {
+  box-shadow:
+    0 1px 2px rgba(16, 24, 40, 0.05),
+    0 18px 40px -18px rgba(16, 24, 40, 0.22);
+}
+
+/* Canvas atmosphere: a whisper of brand at the top, never loud */
+.app-canvas {
+  background:
+    radial-gradient(900px 380px at 100% -8%, color-mix(in oklab, var(--brand) 8%, transparent), transparent 60%),
+    radial-gradient(700px 320px at -5% -10%, rgba(20, 30, 60, 0.05), transparent 60%),
+    var(--background);
+}
+
+/* Staggered load-in */
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.fade-up {
+  animation: fade-up 560ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* Right-side drawer slide-in (lead "Activity timeline" panel) */
+@keyframes slide-in-right {
+  from {
+    opacity: 0;
+    transform: translateX(100%);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+.slide-in-right {
+  animation: slide-in-right 300ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+::selection {
+  background: color-mix(in oklab, var(--brand) 22%, transparent);
+}
+
+/* Thin, unobtrusive scrollbars */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(120, 130, 150, 0.35) transparent;
+}

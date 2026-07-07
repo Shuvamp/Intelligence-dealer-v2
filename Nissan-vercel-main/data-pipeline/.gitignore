@@ -1,0 +1,9 @@
+.env
+*.local.env
+!.env.example
+.venv*/
+venv/
+__pycache__/
+*.py[cod]
+.user.yml
+*.log

@@ -1,0 +1,45 @@
+# Render blueprint — hosts the FastAPI agent service (apps/api).
+# Vercel/Cloudflare cannot run Python; this is its separate home.
+# Deploy: Render Dashboard → New → Blueprint → point at this repo.
+# Secrets (sync:false) must be filled in the Render dashboard, NOT committed.
+services:
+  - type: web
+    name: adip-api
+    runtime: docker
+    dockerfilePath: apps/api/Dockerfile
+    dockerContext: apps/api
+    healthCheckPath: /health
+    plan: starter
+    autoDeploy: true
+    envVars:
+      # ── Supabase (server-side; service key bypasses RLS for agent writes) ──
+      - key: SUPABASE_URL
+        value: https://guoeqsrdmxqzmaxjfald.supabase.co
+      - key: SUPABASE_SERVICE_KEY
+        sync: false          # dashboard → Settings → API → service_role key
+      # Assignment agent: point at Supabase instead of its default :memory: DuckDB.
+      - key: ASSIGNMENT_DB_URL
+        value: https://guoeqsrdmxqzmaxjfald.supabase.co
+      # ── Frontend origin (Vercel URL) for CORS / OAuth redirects ──
+      - key: FRONTEND_URL
+        sync: false          # e.g. https://adip.vercel.app
+      # ── LLM keys (all secret) ──
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: NVIDIA_API_KEY
+        sync: false
+      # ── Social / WhatsApp (optional; only if those features are used) ──
+      - key: FACEBOOK_APP_ID
+        sync: false
+      - key: FACEBOOK_APP_SECRET
+        sync: false
+      - key: LINKEDIN_CLIENT_ID
+        sync: false
+      - key: LINKEDIN_CLIENT_SECRET
+        sync: false
+      - key: WHATSAPP_WEBHOOK_VERIFY_TOKEN
+        sync: false

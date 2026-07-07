@@ -1,0 +1,37 @@
+FROM python:3.12-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends curl \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY apps/api/requirements.txt ./
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY apps/api/ ./
+
+# The scoring agent's holistic LLM rubric lives in repo-root docs/, outside
+# apps/api. Without it, rubric_available() is False and scoring silently falls
+# back to deterministic heuristics. Copy it in and point the loader at it.
+COPY docs/scoring_agent_md ./docs/scoring_agent_md
+ENV SCORING_RUBRIC_DIR=/app/docs/scoring_agent_md
+
+# Persist the marketing DuckDB on the mounted Railway volume (made writable by
+# the chmod in CMD). Baked here so persistence works without a separate Railway
+# variable. Remove/override if no volume is mounted at /app/data.
+ENV DUCKDB_DIR=/app/data
+
+# Run as root: Railway persistent volumes mount root-owned, so a non-root user
+# (uid 1001) hits "Permission denied" opening /app/data/analytics.duckdb. A
+# build-time chown can't help — the volume mounts over /app/data at runtime.
+
+EXPOSE 8000
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+  CMD curl -f "http://localhost:${PORT:-8000}/health" || exit 1
+
+# Startup: ensure the persistent volume dir is writable (Railway mounts volumes
+# root-owned at runtime; as root we chmod it so DuckDB can open its file there),
+# then run a single worker (DuckDB is a single-writer embedded file — >1 worker
+# causes "Conflicting lock" IO errors on /db/* and the intake store).
+CMD ["sh", "-c", "mkdir -p /app/data && chmod -R 777 /app/data 2>/dev/null || true; uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000} --workers 1"]

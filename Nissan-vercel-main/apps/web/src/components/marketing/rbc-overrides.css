@@ -1,0 +1,206 @@
+/* react-big-calendar brand overrides — scoped to .rbc-brand wrapper */
+
+.rbc-brand .rbc-month-view {
+  border: none;
+  height: 100%;
+  font-family: inherit;
+}
+
+/* Day-of-week header row */
+.rbc-brand .rbc-header {
+  padding: 10px 4px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #6b7280;
+  background-color: #f9fafb;
+  border-bottom: 2px solid #e5e7eb;
+}
+
+.rbc-brand .rbc-header + .rbc-header {
+  border-left: 1px solid #e5e7eb;
+}
+
+/* Row borders. overflow:hidden + min-height:0 keep each week row bounded to its
+   equal share of the calendar height even when showAllEvents renders many. */
+.rbc-brand .rbc-month-row {
+  border-top: 1px solid #e5e7eb;
+  overflow: hidden;
+  min-height: 0;
+}
+
+/* showAllEvents renders every event in the cell — scroll the event area of a
+   busy week row (>2 events on a day) instead of clipping or "+N more". */
+.rbc-brand .rbc-row-content {
+  max-height: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: #c3002f33 transparent;
+}
+
+.rbc-brand .rbc-row-content::-webkit-scrollbar {
+  width: 6px;
+}
+
+.rbc-brand .rbc-row-content::-webkit-scrollbar-thumb {
+  background: #c3002f33;
+  border-radius: 3px;
+}
+
+.rbc-brand .rbc-day-bg + .rbc-day-bg {
+  border-left: 1px solid #e5e7eb;
+}
+
+/* Off-range days (days from prev/next month shown to fill grid) */
+.rbc-brand .rbc-off-range-bg {
+  background-color: #f9fafb;
+}
+
+.rbc-brand .rbc-off-range .rbc-button-link {
+  color: #d1d5db !important;
+}
+
+/* Today highlight */
+.rbc-brand .rbc-today {
+  background-color: rgba(219, 234, 254, 0.45) !important;
+}
+
+/* Cell hover — Nissan brand blush */
+.rbc-brand .rbc-day-bg {
+  transition: background-color 0.1s ease;
+  cursor: pointer;
+}
+
+.rbc-brand .rbc-day-bg:hover {
+  background-color: #fff0f3 !important;
+}
+
+/* Day number */
+.rbc-brand .rbc-date-cell {
+  text-align: right;
+  padding: 4px 8px 2px;
+}
+
+.rbc-brand .rbc-button-link {
+  font-size: 12px;
+  font-weight: 700;
+  color: rgba(17, 24, 39, 0.7);
+  pointer-events: none; /* prevent drill-down on day number */
+}
+
+.rbc-brand .rbc-now .rbc-button-link {
+  color: #2563eb !important;
+}
+
+/* Events */
+.rbc-brand .rbc-row-segment {
+  padding: 0 2px 2px;
+}
+
+.rbc-brand .rbc-event,
+.rbc-brand .rbc-background-event {
+  border: none !important;
+  border-radius: 4px !important;
+  padding: 1px 6px !important;
+  font-size: 10px !important;
+  font-weight: 600 !important;
+  color: white !important;
+  min-height: 16px;
+}
+
+.rbc-brand .rbc-event:focus,
+.rbc-brand .rbc-event.rbc-selected {
+  outline: none !important;
+  box-shadow: 0 0 0 2px rgba(195, 0, 47, 0.35) !important;
+}
+
+.rbc-brand .rbc-event-label {
+  display: none;
+}
+
+.rbc-brand .rbc-event-content {
+  font-size: 10px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* +N more link — brand red */
+.rbc-brand .rbc-show-more {
+  font-size: 10px;
+  font-weight: 600;
+  color: #c3002f;
+  background: transparent;
+  padding: 0 4px;
+  margin-top: 2px;
+  text-decoration: none;
+}
+
+.rbc-brand .rbc-show-more:hover {
+  color: #a50027;
+  text-decoration: underline;
+}
+
+/* Popup overlay when clicking +N more */
+.rbc-brand .rbc-overlay {
+  border-radius: 12px;
+  border: 1px solid #e5e7eb;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.1);
+  padding: 8px;
+  min-width: 180px;
+  z-index: 50;
+  background: white;
+}
+
+.rbc-brand .rbc-overlay-header {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 4px 8px 8px;
+  border-bottom: 1px solid #e5e7eb;
+  margin-bottom: 4px;
+  color: #374151;
+}
+
+/* "+N more" popup is portalled to <body> (outside .rbc-brand), so target the
+   RBC classes globally. Make it scrollable so every event on a busy day is
+   reachable, and let full event names wrap instead of clipping. */
+.rbc-overlay {
+  max-height: 300px;
+  overflow-y: auto;
+  border-radius: 12px;
+  border: 1px solid #e5e7eb;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.12);
+  padding: 8px;
+  min-width: 200px;
+  z-index: 60;
+  background: #fff;
+}
+
+.rbc-overlay-header {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 4px 8px 8px;
+  border-bottom: 1px solid #e5e7eb;
+  margin-bottom: 6px;
+  color: #374151;
+}
+
+.rbc-overlay .rbc-event {
+  margin-bottom: 4px;
+  border: none !important;
+  border-radius: 6px !important;
+  padding: 4px 8px !important;
+  font-size: 11px !important;
+  font-weight: 600 !important;
+  color: #fff !important;
+  cursor: pointer;
+}
+
+.rbc-overlay .rbc-event-content {
+  white-space: normal !important;
+  overflow: visible !important;
+  line-height: 1.25;
+}

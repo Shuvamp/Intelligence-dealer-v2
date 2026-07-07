@@ -1,0 +1,8 @@
+# Vercel deploys only the frontend. The FastAPI service is deployed on Railway.
+apps/api/
+data-pipeline/
+
+# Backend/deployment files that can trigger Vercel's Python/FastAPI detector.
+Dockerfile.railway
+railway.json
+render.yaml
