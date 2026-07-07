@@ -1,0 +1,24 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell -ExecutionPolicy Bypass -File \".claude\\hooks\\marketing-scope-gate.ps1\""
+          }
+        ]
+      }
+    ]
+  },
+  "permissions": {
+    "allow": [
+      "Skill(run)",
+      "Skill(run:*)",
+      "Bash(findstr \":54321 \\|:3000 \\|:8001 \")",
+      "Bash(.venv/Scripts/python.exe -m uvicorn main:app --port 8001 --reload)",
+      "Bash(.venv/Scripts/pip.exe install *)"
+    ]
+  }
+}

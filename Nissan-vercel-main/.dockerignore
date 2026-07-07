@@ -1,0 +1,52 @@
+# Root-level .dockerignore — excludes files from the Docker build context
+# (applies to all Dockerfiles that use . as their build context)
+
+# Git
+.git
+.gitignore
+
+# Dev environments
+node_modules/
+**/.venv/
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+
+# Dev runtime artifacts
+apps/api/.uploads/
+apps/local-api/uploads/
+apps/api/adip_dev.duckdb
+
+# Logs
+*.log
+
+# Secrets — never bake into images
+apps/api/.env
+.env.prod
+.env.*
+!.env.example
+!.env.prod.example
+
+# Build outputs (rebuilt inside Docker)
+apps/web/.output/
+apps/web/.nitro/
+apps/web/.tanstack/
+apps/web/dist/
+
+# Tests — not needed at runtime
+apps/api/tests/
+
+# Docs / plans — excluded EXCEPT the scoring rubric, which the scoring agent
+# loads at runtime (Dockerfile.railway COPYs docs/scoring_agent_md into the image).
+# Without this exception the COPY fails and the whole Railway build fails.
+docs/
+!docs/scoring_agent_md/
+!docs/scoring_agent_md/**
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db

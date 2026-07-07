@@ -1,0 +1,8 @@
+allowBuilds:
+  duckdb: true
+  unrs-resolver: true
+onlyBuiltDependencies:
+  - esbuild
+  - lightningcss
+  - duckdb
+  - unrs-resolver
