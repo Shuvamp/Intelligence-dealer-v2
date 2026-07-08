@@ -6,7 +6,7 @@ import {
   approveCampaign, approveEvent, generatePosterImage, getChannelStatus,
 } from '#/lib/marketing'
 import {
-  Zap, RefreshCw, Hash, Image as ImageIcon, ChevronDown, Car, Download, Calendar,
+  Zap, RefreshCw, Hash, Image as ImageIcon, ChevronDown, ChevronLeft, ChevronRight, Car, Download, Calendar,
   AlertCircle, Loader2, Sparkles, Save, CheckCircle2, X as XIcon, Plus, Link2, Check,
 } from 'lucide-react'
 import type {
@@ -274,31 +274,9 @@ function ContentStudio() {
     return m
   }, [channels])
 
-  // ── Resizable right (Channel Preview) panel ──────────────────────────────
-  const RIGHT_MIN = 60, RIGHT_MAX = 720, RIGHT_DEFAULT = 280
-  const [rightWidth, setRightWidth] = useState(RIGHT_DEFAULT)
-  const dragging = useRef(false)
-  const startResize = (e: React.PointerEvent) => {
-    e.preventDefault()
-    dragging.current = true
-    document.body.style.cursor = 'col-resize'
-    document.body.style.userSelect = 'none'
-    const onMove = (ev: PointerEvent) => {
-      if (!dragging.current) return
-      const w = window.innerWidth - ev.clientX
-      setRightWidth(Math.min(RIGHT_MAX, Math.max(RIGHT_MIN, w)))
-    }
-    const onUp = () => {
-      dragging.current = false
-      document.body.style.cursor = ''
-      document.body.style.userSelect = ''
-      window.removeEventListener('pointermove', onMove)
-      window.removeEventListener('pointerup', onUp)
-    }
-    window.addEventListener('pointermove', onMove)
-    window.addEventListener('pointerup', onUp)
-  }
-  const rightCollapsed = rightWidth <= RIGHT_MIN + 8
+  // ── Collapsible right (Channel Preview) panel ────────────────────────────
+  const PREVIEW_WIDTH = 280            // px — open width
+  const [previewOpen, setPreviewOpen] = useState(false)   // hidden by default on load
 
   // ── selection ────────────────────────────────────────────────────────────
   const [selectedId, setSelectedId] = useState<string>(campaigns[0]?.id ?? EVENTS_ID)
@@ -877,7 +855,7 @@ function ContentStudio() {
   return (
     // Break out of AppShell's px-6 py-7 wrapper and own the viewport height below
     // the 64px TopBar, so only the center column scrolls — sides stay fixed.
-    <div className="flex -mx-6 -my-7 overflow-hidden" style={{ height: 'calc(100vh - 64px)' }}>
+    <div className="relative flex -mx-6 -my-7 overflow-hidden" style={{ height: 'calc(100vh - 64px)' }}>
       {/* ── Left Panel ──────────────────────────────────────────────────── */}
       <div className="w-64 shrink-0 border-r border-border bg-white flex flex-col">
         {/* Source selector: campaigns + monthly events */}
@@ -1217,7 +1195,7 @@ function ContentStudio() {
                                 )
                               ) : (
                                 <Link
-                                  to="/marketing/connected-channels"
+                                  to="/connected-channels"
                                   search={{} as any}
                                   onClick={(e) => e.stopPropagation()}
                                   className="shrink-0 inline-flex items-center gap-1 rounded-[8px] border border-[#C3002F]/30 bg-[#FFF0F3] px-2 py-1 text-[10px] font-semibold text-[#C3002F] hover:bg-[#FFE0E6] transition"
@@ -1480,38 +1458,25 @@ function ContentStudio() {
         </div>
       </div>
 
-      {/* ── Drag handle (resize Channel Preview) ───────────────────────── */}
-      <div
-        onPointerDown={startResize}
-        onDoubleClick={() => setRightWidth(rightCollapsed ? RIGHT_DEFAULT : RIGHT_MIN)}
-        title="Drag to resize · double-click to collapse/expand"
-        className="group relative w-1.5 shrink-0 cursor-col-resize bg-border hover:bg-[#C3002F]/40 active:bg-[#C3002F]/60 transition-colors"
+      {/* ── Floating toggle arrow — rides the panel's left edge ────────── */}
+      <button
+        type="button"
+        onClick={() => setPreviewOpen((o) => !o)}
+        aria-expanded={previewOpen}
+        aria-label={previewOpen ? 'Hide Channel Preview' : 'Show Channel Preview'}
+        title={previewOpen ? 'Hide Channel Preview' : 'Show Channel Preview'}
+        style={{ right: previewOpen ? PREVIEW_WIDTH : 0 }}
+        className="absolute top-1/2 -translate-y-1/2 z-40 flex items-center justify-center h-16 w-6 rounded-l-[10px] border border-r-0 border-border bg-white text-muted-foreground shadow-float hover:text-[#C3002F] hover:border-[#C3002F]/40 transition-[right,color] duration-300 ease-[cubic-bezier(0.16,1,0.3,1)]"
       >
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 flex flex-col gap-[3px] rounded-full bg-white border border-border px-[3px] py-1.5 shadow-sm group-hover:border-[#C3002F]/40">
-          <span className="h-[3px] w-[3px] rounded-full bg-muted-foreground/50 group-hover:bg-[#C3002F]" />
-          <span className="h-[3px] w-[3px] rounded-full bg-muted-foreground/50 group-hover:bg-[#C3002F]" />
-          <span className="h-[3px] w-[3px] rounded-full bg-muted-foreground/50 group-hover:bg-[#C3002F]" />
-        </div>
-      </div>
+        {previewOpen ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
+      </button>
 
-      {/* ── Right Panel — Channel Preview (resizable) ──────────────────── */}
-      <div className="shrink-0 bg-white flex flex-col overflow-hidden border-l border-border" style={{ width: rightWidth }}>
-        {rightCollapsed ? (
-          <button
-            type="button"
-            onClick={() => setRightWidth(RIGHT_DEFAULT)}
-            title="Expand Channel Preview"
-            className="flex-1 w-full flex items-center justify-center hover:bg-muted/30 transition-colors"
-          >
-            <span
-              className="text-[10px] font-bold tracking-[0.2em] text-muted-foreground uppercase"
-              style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)' }}
-            >
-              Channel Preview
-            </span>
-          </button>
-        ) : (
-          <>
+      {/* ── Right Panel — Channel Preview (collapsible) ────────────────── */}
+      <div
+        className="shrink-0 bg-white flex flex-col overflow-hidden border-l border-border transition-[width] duration-300 ease-[cubic-bezier(0.16,1,0.3,1)]"
+        style={{ width: previewOpen ? PREVIEW_WIDTH : 0 }}
+      >
+        <div className="flex flex-col h-full shrink-0" style={{ width: PREVIEW_WIDTH }}>
             <div className="px-4 py-3 border-b border-border shrink-0">
               <p className="text-[13px] font-semibold text-foreground mb-2">Channel Preview</p>
               <div className="flex flex-wrap gap-1.5">
@@ -1707,8 +1672,7 @@ function ContentStudio() {
                 </div>
               </div>
             </div>
-          </>
-        )}
+        </div>
       </div>
     </div>
   )

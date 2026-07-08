@@ -10,6 +10,7 @@ import {
   Settings,
   BarChart3,
   Activity,
+  Link2,
   type LucideIcon,
 } from 'lucide-react'
 import type { SubscriptionPlan } from '#/lib/types'
@@ -42,10 +43,10 @@ export const NAV_ITEMS: Array<NavItem> = [
       { label: 'Content Studio',     to: '/marketing/content-studio' },
       { label: 'Publishing',         to: '/marketing/publishing' },
       { label: 'Media Library',      to: '/marketing/media-library' },
-      { label: 'Connected Channels', to: '/marketing/connected-channels' },
     ],
   },
   { label: 'Intelligence', to: '/intelligence', icon: LineChart, minPlan: 'intelligence', group: 'main' },
+  { label: 'Connected Channels', to: '/connected-channels', icon: Link2, minPlan: 'intelligence', group: 'main' },
   { label: 'Copilot', to: '/copilot', icon: Sparkles, minPlan: 'intelligence', group: 'main' },
   { label: 'Pipeline Log', to: '/pipeline-log', icon: Activity, minPlan: 'starter', group: 'system' },
   { label: 'Reports', to: '/reports', icon: FileBarChart, minPlan: 'growth', group: 'system' },

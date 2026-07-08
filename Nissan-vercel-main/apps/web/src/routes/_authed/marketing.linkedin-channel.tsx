@@ -34,7 +34,7 @@ function LinkedInChannelPage() {
   const [busy, setBusy] = useState<string | null>(null)
   const [banner, setBanner] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
 
-  const back = () => router.navigate({ to: '/marketing/connected-channels', search: {} as any })
+  const back = () => router.navigate({ to: '/connected-channels', search: {} as any })
 
   const handleSync = async () => {
     setBusy('sync')
