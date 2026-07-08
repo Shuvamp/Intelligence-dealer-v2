@@ -121,7 +121,7 @@ async function nav(page, url, label, screenshotId) {
     log('🔍', 'Media library items', `${mediaItems.length} elements`);
 
     // ─── CONNECTED CHANNELS ──────────────────────────────────────
-    await nav(page, BASE_URL + '/marketing/connected-channels', 'Connected channels loads', '08-connected-channels');
+    await nav(page, BASE_URL + '/connected-channels', 'Connected channels loads', '08-connected-channels');
 
     const channelItems = await page.$$('[class*="channel"], [class*="platform"], [class*="account"]');
     log('🔍', 'Channel items', `${channelItems.length} elements`);

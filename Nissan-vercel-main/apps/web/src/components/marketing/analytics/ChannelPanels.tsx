@@ -57,7 +57,7 @@ export function ConnectedChannelsCard({ connections }: { connections: Array<Chan
           )
         })}
       </div>
-      <Link to="/marketing/connected-channels" search={{} as any} className="mt-3 inline-block text-[11px] font-semibold text-[#C3002F]">
+      <Link to="/connected-channels" search={{} as any} className="mt-3 inline-block text-[11px] font-semibold text-[#C3002F]">
         Manage channels →
       </Link>
     </div>
@@ -91,7 +91,7 @@ export function LinkedInInsightsPanel({ data }: { data: LinkedInInsights }) {
         <Linkedin className="mx-auto mb-2 h-8 w-8 text-[#0A66C2]" />
         <p className="text-[13px] font-semibold text-[#1A1A1A]">LinkedIn not connected</p>
         <p className="mt-0.5 text-[11px] text-[#9CA3AF]">Connect LinkedIn to see post insights.</p>
-        <Link to="/marketing/connected-channels" search={{} as any} className="mt-3 inline-block rounded-[10px] bg-[#0A66C2] px-3 py-1.5 text-[12px] font-semibold text-white">
+        <Link to="/connected-channels" search={{} as any} className="mt-3 inline-block rounded-[10px] bg-[#0A66C2] px-3 py-1.5 text-[12px] font-semibold text-white">
           Connect LinkedIn
         </Link>
       </div>
