@@ -16,5 +16,8 @@ openai
 # Call Intelligence Agent (Phase 5) — local speech-to-text, no API cost.
 # Optional at runtime: the agent falls back to a mock transcript if absent.
 faster-whisper
+# Website Extraction Engine (Phase 2) — static HTML parsing only, no JS rendering.
+beautifulsoup4
+lxml
 pytest
 pytest-asyncio
