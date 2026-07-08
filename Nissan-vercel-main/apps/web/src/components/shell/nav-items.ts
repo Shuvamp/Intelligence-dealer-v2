@@ -10,6 +10,7 @@ import {
   Settings,
   BarChart3,
   Activity,
+  Compass,
   type LucideIcon,
 } from 'lucide-react'
 import type { SubscriptionPlan } from '#/lib/types'
@@ -31,6 +32,7 @@ export interface NavItem {
 // Order tells the platform story: Customer -> Lead -> Campaign -> Insight -> Copilot.
 export const NAV_ITEMS: Array<NavItem> = [
   { label: 'Dashboard', to: '/dashboard', icon: LayoutDashboard, minPlan: 'starter', group: 'main' },
+  { label: 'Context Planner', to: '/context-planner', icon: Compass, minPlan: 'intelligence', group: 'main' },
   { label: 'Customers', to: '/customers', icon: Users, minPlan: 'starter', group: 'main' },
   { label: 'Leads', to: '/leads', icon: Target, minPlan: 'starter', group: 'main' },
   { label: 'Assignments', to: '/assignments', icon: BarChart3, minPlan: 'starter', group: 'main' },

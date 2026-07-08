@@ -341,6 +341,58 @@ async function initSchema() {
     executive_id VARCHAR, event_type VARCHAR, message VARCHAR,
     is_read BOOLEAN DEFAULT FALSE, created_at VARCHAR
   )`)
+  // Context Planner (Phase 1 of the Context/SEO/AEO vertical, docs/planner/).
+  await run(`CREATE TABLE context_plans (
+    id VARCHAR PRIMARY KEY, tenant_id VARCHAR NOT NULL,
+    input_type VARCHAR NOT NULL, url VARCHAR, normalized_url VARCHAR,
+    company_name VARCHAR, website VARCHAR, region VARCHAR, industry VARCHAR,
+    products VARCHAR, services VARCHAR, description VARCHAR,
+    status VARCHAR DEFAULT 'pending', errors VARCHAR DEFAULT '[]',
+    created_at VARCHAR, updated_at VARCHAR
+  )`)
+  // Website Extraction Engine (Phase 2 of the Context/SEO/AEO vertical, docs/planner/).
+  await run(`CREATE TABLE website_extractions (
+    id VARCHAR PRIMARY KEY, tenant_id VARCHAR NOT NULL, context_id VARCHAR NOT NULL,
+    url VARCHAR, status VARCHAR DEFAULT 'queued',
+    extraction_data VARCHAR, errors VARCHAR DEFAULT '[]',
+    created_at VARCHAR, updated_at VARCHAR, started_at VARCHAR, completed_at VARCHAR
+  )`)
+  // Company Summary (Phase 3 of the Context/SEO/AEO vertical, docs/planner/).
+  await run(`CREATE TABLE company_summaries (
+    id VARCHAR PRIMARY KEY, tenant_id VARCHAR NOT NULL, extraction_id VARCHAR NOT NULL, context_id VARCHAR NOT NULL,
+    company_name VARCHAR, website VARCHAR, region VARCHAR, industry VARCHAR,
+    products VARCHAR DEFAULT '[]', services VARCHAR DEFAULT '[]',
+    description VARCHAR, verdict VARCHAR,
+    status VARCHAR DEFAULT 'pending', errors VARCHAR DEFAULT '[]',
+    created_at VARCHAR, updated_at VARCHAR
+  )`)
+  // SEO Agent (Phase 4 of the Context/SEO/AEO vertical, docs/planner/).
+  await run(`CREATE TABLE seo_analyses (
+    id VARCHAR PRIMARY KEY, tenant_id VARCHAR NOT NULL, extraction_id VARCHAR NOT NULL, context_id VARCHAR NOT NULL,
+    status VARCHAR DEFAULT 'queued', analysis_data VARCHAR, overall_score INTEGER, errors VARCHAR DEFAULT '[]',
+    created_at VARCHAR, updated_at VARCHAR, started_at VARCHAR, completed_at VARCHAR
+  )`)
+  // AEO Agent (Phase 5 of the Context/SEO/AEO vertical, docs/planner/).
+  await run(`CREATE TABLE aeo_analyses (
+    id VARCHAR PRIMARY KEY, tenant_id VARCHAR NOT NULL, extraction_id VARCHAR NOT NULL, context_id VARCHAR NOT NULL,
+    status VARCHAR DEFAULT 'queued', analysis_data VARCHAR, overall_score INTEGER, errors VARCHAR DEFAULT '[]',
+    created_at VARCHAR, updated_at VARCHAR, started_at VARCHAR, completed_at VARCHAR
+  )`)
+  // Recommendation Engine (Phase 6 of the Context/SEO/AEO vertical, docs/planner/).
+  await run(`CREATE TABLE recommendation_reports (
+    id VARCHAR PRIMARY KEY, tenant_id VARCHAR NOT NULL, extraction_id VARCHAR NOT NULL,
+    context_id VARCHAR NOT NULL, seo_analysis_id VARCHAR NOT NULL, aeo_analysis_id VARCHAR NOT NULL,
+    status VARCHAR DEFAULT 'queued', report_data VARCHAR, combined_score INTEGER, errors VARCHAR DEFAULT '[]',
+    created_at VARCHAR, updated_at VARCHAR, started_at VARCHAR, completed_at VARCHAR
+  )`)
+  // Report Generator (Phase 7 of the Context/SEO/AEO vertical, docs/planner/).
+  await run(`CREATE TABLE generated_reports (
+    id VARCHAR PRIMARY KEY, tenant_id VARCHAR NOT NULL, extraction_id VARCHAR NOT NULL,
+    context_id VARCHAR NOT NULL, recommendation_report_id VARCHAR NOT NULL,
+    seo_analysis_id VARCHAR NOT NULL, aeo_analysis_id VARCHAR NOT NULL, company_summary_id VARCHAR,
+    status VARCHAR DEFAULT 'queued', report_data VARCHAR, markdown_content VARCHAR, overall_score INTEGER,
+    errors VARCHAR DEFAULT '[]', created_at VARCHAR, updated_at VARCHAR, started_at VARCHAR, completed_at VARCHAR
+  )`)
 }
 
 // ─── Seed ─────────────────────────────────────────────────────────────────────

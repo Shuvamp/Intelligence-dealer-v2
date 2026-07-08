@@ -42,7 +42,7 @@ from agents.call_intelligence.service import (
 from agents.call_intelligence.data import CallData
 from agents.events import bus, DomainEvent, EventType  # Phase 7 — event bus
 
-from app.routers import marketing, instagram, auth, linkedin, channels, publish
+from app.routers import marketing, instagram, auth, linkedin, channels, publish, context_planner, website_extraction, company_summary, seo_agent, aeo_agent, recommendation_engine, report_generator
 from app.routers import db as db_router
 
 # GROQ_API_KEY (and the rest of apps/api/.env) is read ONCE here at startup.
@@ -76,6 +76,13 @@ app.include_router(linkedin.router, prefix="/api/linkedin", tags=["linkedin"])
 app.include_router(channels.router, prefix="/api/channels", tags=["channels"])
 app.include_router(publish.router, prefix="/api/publish", tags=["publish"])
 app.include_router(auth.router, prefix="/auth", tags=["auth"])
+app.include_router(context_planner.router, prefix="/context-planner", tags=["context-planner"])
+app.include_router(website_extraction.router, prefix="/website-extraction", tags=["website-extraction"])
+app.include_router(company_summary.router, prefix="/company-summary", tags=["company-summary"])
+app.include_router(seo_agent.router, prefix="/seo-agent", tags=["seo-agent"])
+app.include_router(aeo_agent.router, prefix="/aeo-agent", tags=["aeo-agent"])
+app.include_router(recommendation_engine.router, prefix="/recommendation-engine", tags=["recommendation-engine"])
+app.include_router(report_generator.router, prefix="/report-generator", tags=["report-generator"])
 
 app.mount("/posters", StaticFiles(directory=str(POSTERS_DIR)), name="posters")
 
