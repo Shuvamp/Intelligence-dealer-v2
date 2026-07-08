@@ -9,14 +9,13 @@ import {
 } from '#/lib/marketing'
 import type { ChannelConnection, LinkedInState } from '#/lib/types'
 import {
-  CheckCircle2, XCircle, RefreshCw, ExternalLink, Loader2, AlertCircle,
-  AlertTriangle, RotateCw, Link2, Network, Calendar, Lock, ChevronRight,
-  MoreHorizontal, X,
+  CheckCircle2, RefreshCw, ExternalLink, Loader2, AlertCircle,
+  AlertTriangle, RotateCw, Link2, Network, MoreHorizontal, X, Search, Plus,
 } from 'lucide-react'
 import { ChannelIcon } from '#/components/marketing/ChannelIcon'
-import { Button, Badge, formatIN, formatINTime } from '#/components/ui/kit'
+import { Button, formatIN, formatINTime } from '#/components/ui/kit'
 
-export const Route = createFileRoute('/_authed/connected-channels')({
+export const Route = createFileRoute('/_authed/channels')({
   validateSearch: (search: Record<string, unknown>) => ({
     connected: (search.connected as string) ?? undefined,
     error: (search.error as string) ?? undefined,
@@ -31,6 +30,10 @@ const CHANNEL_META: Record<string, { label: string; color: string; bg: string; d
   linkedin:        { label: 'LinkedIn',            color: '#0A66C2', bg: '#EFF6FF', description: 'Share posts and updates to your LinkedIn Company Page.' },
   google_business: { label: 'Google Business',     color: '#34A853', bg: '#F0FDF4', description: 'Publish updates to your Google Business Profile listing.' },
   whatsapp:        { label: 'WhatsApp Business',   color: '#25D366', bg: '#F0FDF4', description: 'Send campaign messages to opted-in customers via WhatsApp.' },
+  x:               { label: 'X (Twitter)',         color: '#000000', bg: '#F4F4F5', description: 'Post updates and threads to your X (formerly Twitter) profile.' },
+  youtube:         { label: 'YouTube',             color: '#FF0000', bg: '#FEF2F2', description: 'Publish video updates and community posts to your channel.' },
+  telegram:        { label: 'Telegram',            color: '#229ED9', bg: '#EFF9FF', description: 'Broadcast campaign messages to your Telegram channel.' },
+  threads:         { label: 'Threads',             color: '#000000', bg: '#F4F4F5', description: 'Share posts and updates to your Threads profile.' },
 }
 
 // Known LinkedIn company/profile page for the demo tenant. Used when the LinkedIn
@@ -69,6 +72,11 @@ function ConnectedChannels() {
 
   const setChannelState = (ch: string, s: ConnectState) =>
     setConnectState(prev => ({ ...prev, [ch]: s }))
+
+  // View controls (client-side only — no effect on connection state or APIs)
+  const [query, setQuery] = useState('')
+  const [filter, setFilter] = useState<'all' | 'connected'>('connected')
+  const [sort, setSort] = useState<'az' | 'recent'>('az')
 
   const [igLocal, setIgLocal] = useState<{ handle?: string; instagram_business_account_id?: string } | null>(() => {
     try { return JSON.parse(localStorage.getItem('ig_connection') ?? 'null') } catch { return null }
@@ -277,8 +285,8 @@ function ConnectedChannels() {
     }
   }
 
-  // "Sync Now" header action — syncs every currently-connected channel in turn,
-  // reusing the same server fn as the per-card Sync button.
+  // "Sync all" toolbar action — syncs every currently-connected channel in turn,
+  // reusing the same server fn as the per-card Sync action.
   const handleSyncAll = async () => {
     setBusy('sync-all')
     try {
@@ -309,11 +317,16 @@ function ConnectedChannels() {
     return (ch.status === 'connected' || localConnected) && !liReconnect
   }
 
-  const knownChannels = channels.filter((c: ChannelConnection) => CHANNEL_META[c.channel])
+  // Show every channel we have metadata for. Use the backend record when present,
+  // otherwise synthesize a disconnected entry so newly-added connectors still list.
+  const byChannel = new Map(channels.map((c: ChannelConnection) => [c.channel, c]))
+  const knownChannels: Array<ChannelConnection> = Object.keys(CHANNEL_META).map(
+    (key) => byChannel.get(key) ?? { channel: key, status: 'disconnected', handle: null, last_sync: null },
+  )
   const connectedChannels = knownChannels.filter(channelIsConnected)
   const availableToConnect = knownChannels.filter((c) => !channelIsConnected(c))
 
-  // One card renderer, reused by the connected list and the connect-more list.
+  // One premium card per channel — rendered in a single unified grid.
   const renderChannelCard = (ch: ChannelConnection) => {
     const meta = CHANNEL_META[ch.channel]
     if (!meta) return null
@@ -328,358 +341,349 @@ function ConnectedChannels() {
       (ch.channel === 'instagram' ? igLocal?.handle : null) ??
       (isLinkedIn ? liLocal?.handle : null)
 
-    const accent = liReconnect ? 'before:bg-amber-500' : 'before:bg-emerald-500'
+    const cs = connectState[ch.channel] ?? 'idle'
+    const isConnecting = cs === 'connecting'
+    const hasError = cs === 'error'
+    const isChecking = isLinkedIn && checkingLinkedIn
 
     return (
-      <div
+      <article
         key={ch.channel}
-        className={`group relative overflow-hidden rounded-[20px] border bg-card p-5 shadow-card transition hover:shadow-float ${
-          isConnected
-            ? `border-border before:absolute before:inset-y-4 before:left-0 before:w-[3px] before:rounded-full ${accent}`
-            : 'border-dashed border-border'
-        }`}
+        className="group flex flex-col rounded-[20px] border border-border/70 bg-card p-6 shadow-card transition duration-300 hover:-translate-y-0.5 hover:shadow-float"
       >
-        <div className="flex items-center gap-4">
-          <ChannelIcon channel={ch.channel} />
-
-          <div className="min-w-0 flex-1">
-            <div className="mb-0.5 flex flex-wrap items-center gap-2">
-              <h3 className="text-[15px] font-bold tracking-tight text-foreground">{meta.label}</h3>
-              {liReconnect ? (
-                <Badge tone="amber">
-                  <AlertTriangle className="h-3 w-3" />
-                  Reconnect required
-                </Badge>
-              ) : isConnected ? (
-                <Badge tone="emerald">
-                  <CheckCircle2 className="h-3 w-3" />
-                  Connected
-                </Badge>
-              ) : (
-                <Badge tone="neutral">
-                  <XCircle className="h-3 w-3" />
-                  Not connected
-                </Badge>
-              )}
+        {/* Top: identity + overflow menu */}
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex min-w-0 items-center gap-3.5">
+            <ChannelIcon channel={ch.channel} />
+            <div className="min-w-0">
+              <h3 className="truncate text-[15px] font-semibold tracking-tight text-foreground">{meta.label}</h3>
+              <div className="mt-1">
+                {liReconnect ? (
+                  <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-2.5 py-0.5 text-[11px] font-semibold text-amber-700">
+                    <AlertTriangle className="h-3 w-3" /> Reconnect required
+                  </span>
+                ) : isConnected ? (
+                  <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-0.5 text-[11px] font-semibold text-emerald-700">
+                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" /> Connected
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-0.5 text-[11px] font-semibold text-muted-foreground">
+                    <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/40" /> Not connected
+                  </span>
+                )}
+              </div>
             </div>
-            <p className="text-[12.5px] text-muted-foreground">{meta.description}</p>
-            {isConnected && (ch.account_name || displayHandle) && (
-              <p className="mt-1.5 text-[12px] font-semibold text-foreground">
-                {ch.account_name ?? displayHandle}
-              </p>
-            )}
-            {isConnected && ch.account_id && (
-              <p className="mt-0.5 font-mono text-[10.5px] text-muted-foreground">
-                ID: {ch.account_id}
-              </p>
-            )}
-            {isConnected && ch.last_sync && (
-              <p className="mt-0.5 text-[10.5px] text-muted-foreground">
-                Last sync: {formatIN(ch.last_sync)}
-              </p>
-            )}
           </div>
 
-          <div className="flex shrink-0 items-center gap-2">
-            {isConnected ? (
-              <>
+          {isConnected ? (
+            <details className="relative shrink-0">
+              <summary className="flex h-8 w-8 cursor-pointer list-none items-center justify-center rounded-lg text-muted-foreground/70 transition hover:bg-muted hover:text-foreground [&::-webkit-details-marker]:hidden">
+                <MoreHorizontal className="h-4 w-4" />
+              </summary>
+              <div className="absolute right-0 z-20 mt-1.5 w-52 overflow-hidden rounded-[12px] border border-border bg-card py-1 shadow-float">
                 {!isLinkedIn && (
-                  <Button
-                    variant="outline"
-                    className="h-9 px-3 text-[12.5px]"
+                  <button
+                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-[13px] text-foreground transition hover:bg-muted disabled:opacity-50"
                     disabled={busy !== null}
                     onClick={() => handleSync(ch.channel)}
                   >
-                    {busy === `${ch.channel}-sync` ? (
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    ) : (
-                      <RefreshCw className="h-3.5 w-3.5" />
-                    )}
-                    Sync
-                  </Button>
+                    <RefreshCw className="h-3.5 w-3.5" /> Sync now
+                  </button>
                 )}
                 {isLinkedIn && (
-                  <>
-                    {/* Open the actual LinkedIn profile in a new tab */}
-                    <Button
-                      className="h-9 px-3 text-[12.5px] text-white hover:opacity-90"
-                      style={{ background: '#0A66C2' }}
-                      disabled={busy !== null || checkingLinkedIn}
-                      onClick={() =>
-                        window.open(
-                          linkedinProfileUrl ?? LINKEDIN_PROFILE_FALLBACK,
-                          '_blank',
-                          'noopener,noreferrer',
-                        )
-                      }
-                      title={linkedinProfileUrl ?? LINKEDIN_PROFILE_FALLBACK}
-                    >
-                      {checkingLinkedIn ? (
-                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                      ) : (
-                        <ExternalLink className="h-3.5 w-3.5" />
-                      )}
-                      Open LinkedIn
-                    </Button>
-                    {/* Navigate to internal details / manage page */}
-                    <Button
-                      variant="outline"
-                      className="h-9 px-3 text-[12.5px]"
-                      disabled={busy !== null}
-                      onClick={goToLinkedInDetails}
-                    >
-                      Manage
-                    </Button>
-                  </>
+                  <button
+                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-[13px] text-foreground transition hover:bg-muted"
+                    onClick={goToLinkedInDetails}
+                  >
+                    <Network className="h-3.5 w-3.5" /> Manage connection
+                  </button>
                 )}
+                <button
+                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-[13px] text-foreground transition hover:bg-muted"
+                  onClick={() => router.invalidate()}
+                >
+                  <RotateCw className="h-3.5 w-3.5" /> Refresh status
+                </button>
+              </div>
+            </details>
+          ) : (
+            // Not connected — a single "+" add button triggers the connect flow.
+            <button
+              type="button"
+              aria-label={liReconnect ? `Reconnect ${meta.label}` : `Connect ${meta.label}`}
+              title={liReconnect ? 'Reconnect' : `Connect ${meta.label}`}
+              disabled={busy !== null || isChecking}
+              onClick={() => (liReconnect ? startLinkedInOAuth() : handleConnect(ch.channel))}
+              style={hasError ? { color: '#dc2626', borderColor: '#fecaca' } : liReconnect ? { color: '#b45309', borderColor: '#fcd34d' } : undefined}
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-border bg-card text-foreground transition duration-200 hover:-translate-y-0.5 hover:border-foreground/30 hover:shadow-card disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {isChecking || isConnecting ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : liReconnect ? (
+                <RotateCw className="h-4 w-4" />
+              ) : (
+                <Plus className="h-4 w-4" />
+              )}
+            </button>
+          )}
+        </div>
+
+        {/* Middle: description + connected account meta (connected cards only) */}
+        {isConnected && (
+          <p className="mt-4 text-[13px] leading-relaxed text-muted-foreground">{meta.description}</p>
+        )}
+        {isConnected && (ch.account_name || displayHandle) && (
+          <p className="mt-3 text-[13px] font-semibold text-foreground">{ch.account_name ?? displayHandle}</p>
+        )}
+        {isConnected && ch.account_id && (
+          <p className="mt-0.5 font-mono text-[11px] text-muted-foreground">ID: {ch.account_id}</p>
+        )}
+        {isConnected && ch.last_sync && (
+          <p className="mt-0.5 text-[11px] text-muted-foreground">Last synced {formatIN(ch.last_sync)}</p>
+        )}
+
+        {/* Bottom: actions (connected channels only) */}
+        {isConnected && (
+          <div className="mt-5 flex flex-wrap items-center gap-2 border-t border-border/60 pt-4">
+            {isLinkedIn && (
+                <>
+                  {/* Open the actual LinkedIn profile in a new tab */}
+                  <Button
+                    variant="primary"
+                    className="h-9 px-3.5 text-[12.5px]"
+                    disabled={busy !== null || checkingLinkedIn}
+                    onClick={() =>
+                      window.open(
+                        linkedinProfileUrl ?? LINKEDIN_PROFILE_FALLBACK,
+                        '_blank',
+                        'noopener,noreferrer',
+                      )
+                    }
+                    title={linkedinProfileUrl ?? LINKEDIN_PROFILE_FALLBACK}
+                  >
+                    {checkingLinkedIn ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <ExternalLink className="h-3.5 w-3.5" />
+                    )}
+                    Open
+                  </Button>
+                  {/* Navigate to internal details / manage page */}
+                  <Button
+                    variant="outline"
+                    className="h-9 px-3.5 text-[12.5px]"
+                    disabled={busy !== null}
+                    onClick={goToLinkedInDetails}
+                  >
+                    Manage
+                  </Button>
+                </>
+              )}
+              {!isLinkedIn && (
                 <Button
                   variant="outline"
-                  className="h-9 border-rose-200 bg-rose-50 px-3 text-[12.5px] text-rose-700 hover:bg-rose-100"
+                  className="h-9 px-3.5 text-[12.5px]"
                   disabled={busy !== null}
-                  onClick={() => handleDisconnect(ch.channel)}
+                  onClick={() => handleSync(ch.channel)}
                 >
-                  {busy === `${ch.channel}-disconnect` && (
+                  {busy === `${ch.channel}-sync` ? (
                     <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <RefreshCw className="h-3.5 w-3.5" />
                   )}
-                  Disconnect
+                  Sync
                 </Button>
-                <ChevronRight className="ml-0.5 h-4 w-4 text-muted-foreground/50 transition group-hover:translate-x-0.5 group-hover:text-muted-foreground" />
-              </>
-            ) : (
-              (() => {
-                const cs = connectState[ch.channel] ?? 'idle'
-                const isConnecting = cs === 'connecting'
-                const hasError = cs === 'error'
-                const isChecking = isLinkedIn && checkingLinkedIn
-                const reconnect = liReconnect
-                return (
-                  <Button
-                    className="h-9 px-4 text-[12.5px] text-white hover:opacity-90"
-                    style={{ background: hasError ? '#dc2626' : reconnect ? '#b45309' : meta.color }}
-                    disabled={busy !== null || isChecking}
-                    onClick={() => (reconnect ? startLinkedInOAuth() : handleConnect(ch.channel))}
-                  >
-                    {isChecking ? (
-                      <><Loader2 className="h-3.5 w-3.5 animate-spin" />Checking…</>
-                    ) : isConnecting ? (
-                      <><Loader2 className="h-3.5 w-3.5 animate-spin" />Connecting…</>
-                    ) : reconnect ? (
-                      <><RotateCw className="h-3.5 w-3.5" />Reconnect</>
-                    ) : hasError ? 'Retry' : (
-                      `Connect ${meta.label}`
-                    )}
-                  </Button>
-                )
-              })()
-            )}
+              )}
+              <Button
+                variant="outline"
+                className="h-9 border-rose-200 px-3.5 text-[12.5px] text-rose-600 hover:bg-rose-50"
+                disabled={busy !== null}
+                onClick={() => handleDisconnect(ch.channel)}
+              >
+                {busy === `${ch.channel}-disconnect` && (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                )}
+                Disconnect
+              </Button>
           </div>
-        </div>
-      </div>
+        )}
+      </article>
     )
   }
 
   const lastSyncIso =
     channels.find((c: ChannelConnection) => c.status === 'connected')?.last_sync ?? null
 
-  const stats = [
-    {
-      label: 'Total Channels',
-      value: String(knownChannels.length),
-      sub: 'All available channels',
-      icon: Network,
-      tint: 'text-[var(--brand)]',
-      chip: 'bg-[color-mix(in_oklab,var(--brand)_12%,transparent)]',
-    },
-    {
-      label: 'Connected',
-      value: String(connectedChannels.length),
-      sub: 'Active connections',
-      icon: CheckCircle2,
-      tint: 'text-emerald-600',
-      chip: 'bg-emerald-50',
-    },
-    {
-      label: 'Disconnected',
-      value: String(availableToConnect.length),
-      sub: 'Not connected',
-      icon: AlertCircle,
-      tint: 'text-amber-600',
-      chip: 'bg-amber-50',
-    },
-    {
-      label: 'Last Sync',
-      value: lastSyncIso ? formatIN(lastSyncIso).split(',')[0] : '—',
-      sub: lastSyncIso ? formatINTime(lastSyncIso) : 'No sync yet',
-      icon: Calendar,
-      tint: 'text-sky-600',
-      chip: 'bg-sky-50',
-    },
+  const summary = [
+    { label: 'Total', value: knownChannels.length, dot: 'bg-foreground/40' },
+    { label: 'Connected', value: connectedChannels.length, dot: 'bg-emerald-500' },
+    { label: 'Not Connected', value: availableToConnect.length, dot: 'bg-muted-foreground/40' },
   ]
 
+  // Search + filter + sort are pure view transforms over the same channel list.
+  const q = query.trim().toLowerCase()
+  const visibleChannels = knownChannels
+    .filter((ch) => !q || CHANNEL_META[ch.channel].label.toLowerCase().includes(q))
+    .filter((ch) => (filter === 'connected' ? channelIsConnected(ch) : !channelIsConnected(ch)))
+    .slice()
+    .sort((a, b) => {
+      if (sort === 'az') {
+        return CHANNEL_META[a.channel].label.localeCompare(CHANNEL_META[b.channel].label)
+      }
+      // "Recently connected" — most-recent last_sync first, unsynced last.
+      const at = a.last_sync ? new Date(a.last_sync).getTime() : 0
+      const bt = b.last_sync ? new Date(b.last_sync).getTime() : 0
+      return bt - at
+    })
+
+  const selectCls =
+    'h-10 cursor-pointer rounded-[12px] border border-border bg-card px-3 pr-8 text-[13px] font-medium text-foreground transition hover:bg-muted focus:outline-none focus:ring-2 focus:ring-ring/25'
+
   return (
-    <div className="mx-auto max-w-[1100px] px-6 py-8 md:px-8 space-y-8">
-      {/* Header */}
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h1 className="text-[30px] font-bold tracking-tight text-foreground">Connected Channels</h1>
-          <p className="mt-1 text-[13.5px] text-muted-foreground">
-            Manage your social media and publishing channel integrations.
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button variant="primary" onClick={handleSyncAll} disabled={busy !== null}>
+    <div className="min-h-full" style={{ background: '#FAFAFC' }}>
+      <div className="mx-auto max-w-[1080px] px-6 py-10 md:px-8">
+        {/* Header */}
+        <div className="flex flex-wrap items-end justify-between gap-4">
+          <div>
+            <h1 className="text-[32px] font-bold tracking-tight text-foreground">Channels</h1>
+            <p className="mt-1.5 text-[14px] text-muted-foreground">
+              Connect your social media platforms to publish and manage content.
+            </p>
+          </div>
+          <Button
+            variant="outline"
+            className="h-10 rounded-[12px]"
+            onClick={handleSyncAll}
+            disabled={busy !== null}
+          >
             {busy === 'sync-all' ? (
               <Loader2 className="h-4 w-4 animate-spin" />
             ) : (
               <RefreshCw className="h-4 w-4" />
             )}
-            Sync Now
+            Sync all
           </Button>
-          <details className="relative">
-            <summary className="flex h-10 w-10 cursor-pointer list-none items-center justify-center rounded-lg border border-border bg-card text-foreground transition hover:bg-muted [&::-webkit-details-marker]:hidden">
-              <MoreHorizontal className="h-4 w-4" />
-            </summary>
-            <div className="absolute right-0 z-20 mt-2 w-48 overflow-hidden rounded-[12px] border border-border bg-card py-1 shadow-float">
-              <button
-                className="flex w-full items-center gap-2 px-3 py-2 text-left text-[13px] text-foreground transition hover:bg-muted"
-                onClick={() => router.invalidate()}
-              >
-                <RefreshCw className="h-3.5 w-3.5" /> Refresh status
-              </button>
-              <button
-                className="flex w-full items-center gap-2 px-3 py-2 text-left text-[13px] text-foreground transition hover:bg-muted"
-                onClick={handleSyncAll}
-              >
-                <RotateCw className="h-3.5 w-3.5" /> Sync all channels
-              </button>
-            </div>
-          </details>
         </div>
-      </div>
 
-      {banner && (
-        <div
-          className={`flex items-center gap-3 rounded-[14px] border px-4 py-3 text-[13px] font-medium shadow-card ${
-            banner.type === 'success'
-              ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
-              : 'border-rose-200 bg-rose-50 text-rose-800'
-          }`}
-        >
-          {banner.type === 'success' ? (
-            <CheckCircle2 className="h-4 w-4 shrink-0" />
-          ) : (
-            <AlertCircle className="h-4 w-4 shrink-0" />
-          )}
-          <span className="flex-1">{banner.message}</span>
-          <button
-            aria-label="Dismiss"
-            onClick={() => setBanner(null)}
-            className="rounded-md p-0.5 opacity-60 transition hover:opacity-100"
+        {/* Summary chips */}
+        <div className="mt-6 flex flex-wrap items-center gap-x-6 gap-y-2 text-[13px]">
+          {summary.map((s) => (
+            <span key={s.label} className="inline-flex items-center gap-2">
+              <span className={`h-2 w-2 rounded-full ${s.dot}`} />
+              <span className="font-medium text-foreground">{s.label}</span>
+              <span className="num font-semibold text-foreground">{s.value}</span>
+            </span>
+          ))}
+          <span className="inline-flex items-center gap-2">
+            <span className="h-2 w-2 rounded-full bg-sky-500" />
+            <span className="font-medium text-foreground">Last Sync</span>
+            <span className="text-muted-foreground">
+              • {lastSyncIso ? `${formatIN(lastSyncIso).split(',')[0]} ${formatINTime(lastSyncIso)}` : 'No sync yet'}
+            </span>
+          </span>
+        </div>
+
+        {banner && (
+          <div
+            className={`mt-6 flex items-center gap-3 rounded-[14px] border px-4 py-3 text-[13px] font-medium shadow-card ${
+              banner.type === 'success'
+                ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
+                : 'border-rose-200 bg-rose-50 text-rose-800'
+            }`}
           >
-            <X className="h-3.5 w-3.5" />
-          </button>
-        </div>
-      )}
-
-      {/* Stats */}
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        {stats.map((s) => {
-          const Icon = s.icon
-          return (
-            <div
-              key={s.label}
-              className="rounded-[18px] border border-border bg-card p-5 shadow-card transition hover:shadow-float"
+            {banner.type === 'success' ? (
+              <CheckCircle2 className="h-4 w-4 shrink-0" />
+            ) : (
+              <AlertCircle className="h-4 w-4 shrink-0" />
+            )}
+            <span className="flex-1">{banner.message}</span>
+            <button
+              aria-label="Dismiss"
+              onClick={() => setBanner(null)}
+              className="rounded-md p-0.5 opacity-60 transition hover:opacity-100"
             >
-              <div className={`mb-3 flex h-10 w-10 items-center justify-center rounded-full ${s.chip}`}>
-                <Icon className={`h-5 w-5 ${s.tint}`} strokeWidth={2.2} />
-              </div>
-              <p className="kicker text-muted-foreground/70">{s.label}</p>
-              <p className="num mt-1 text-[28px] font-bold leading-none text-foreground">{s.value}</p>
-              <p className="mt-1.5 text-[12px] text-muted-foreground">{s.sub}</p>
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        )}
+
+        {/* Tabs + search + sort */}
+        <div className="mt-6 flex flex-wrap items-center justify-between gap-3">
+          <div
+            role="tablist"
+            aria-label="Channel view"
+            className="inline-flex items-center gap-1 rounded-[12px] border border-border bg-card p-1"
+          >
+            {([
+              { key: 'connected', label: 'Connected', count: connectedChannels.length },
+              { key: 'all', label: 'All Channels', count: availableToConnect.length },
+            ] as const).map((t) => {
+              const active = filter === t.key
+              return (
+                <button
+                  key={t.key}
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  onClick={() => setFilter(t.key)}
+                  className={`inline-flex items-center gap-2 rounded-[9px] px-3.5 py-1.5 text-[13px] font-semibold transition duration-200 ${
+                    active
+                      ? 'bg-muted text-foreground shadow-sm'
+                      : 'text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  {t.label}
+                  <span
+                    className={`num rounded-full px-1.5 text-[11px] font-semibold ${
+                      active ? 'bg-background text-foreground' : 'bg-muted text-muted-foreground'
+                    }`}
+                  >
+                    {t.count}
+                  </span>
+                </button>
+              )
+            })}
+          </div>
+
+          <div className="flex flex-1 flex-wrap items-center justify-end gap-3">
+            <div className="relative min-w-[200px] max-w-xs flex-1">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <input
+                type="text"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search channels…"
+                aria-label="Search channels"
+                className="h-10 w-full rounded-[12px] border border-border bg-card pl-9 pr-3 text-[13px] text-foreground transition placeholder:text-muted-foreground/70 focus:outline-none focus:ring-2 focus:ring-ring/25"
+              />
             </div>
-          )
-        })}
+            <select
+              value={sort}
+              onChange={(e) => setSort(e.target.value as 'az' | 'recent')}
+              aria-label="Sort channels"
+              className={selectCls}
+            >
+              <option value="az">A–Z</option>
+              <option value="recent">Recently Connected</option>
+            </select>
+          </div>
+        </div>
+
+        {/* Channel grid */}
+        {visibleChannels.length === 0 ? (
+          <div className="mt-6 rounded-[20px] border border-dashed border-border bg-card/50 px-6 py-16 text-center">
+            <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-muted">
+              <Link2 className="h-5 w-5 text-muted-foreground" />
+            </div>
+            <p className="text-[15px] font-semibold text-foreground">No channels match</p>
+            <p className="mt-1 text-[13px] text-muted-foreground">Try adjusting your search or filters.</p>
+          </div>
+        ) : (
+          <div className="mt-6 grid grid-cols-1 gap-5 md:grid-cols-2">
+            {visibleChannels.map(renderChannelCard)}
+          </div>
+        )}
       </div>
-
-      {/* Connected channels — only those actually linked are shown here */}
-      {connectedChannels.length === 0 ? (
-        <div className="rounded-[20px] border-2 border-dashed border-border bg-[color-mix(in_oklab,var(--brand)_4%,transparent)] px-6 py-12 text-center">
-          <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-[color-mix(in_oklab,var(--brand)_12%,transparent)]">
-            <Link2 className="h-5 w-5 text-[var(--brand)]" />
-          </div>
-          <p className="text-[15px] font-semibold text-foreground">No channels connected yet</p>
-          <p className="mt-1 text-[12.5px] text-muted-foreground">
-            Connect a channel below to start publishing.
-          </p>
-        </div>
-      ) : (
-        <div className="space-y-4">
-          <div className="flex items-center gap-2">
-            <h2 className="kicker text-muted-foreground/70">Your Connected Channels</h2>
-            <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] font-semibold text-muted-foreground">
-              {connectedChannels.length}
-            </span>
-          </div>
-          <div className="space-y-3">{connectedChannels.map(renderChannelCard)}</div>
-        </div>
-      )}
-
-      {/* Connect-more — the OAuth entry point for not-yet-connected channels */}
-      {availableToConnect.length > 0 && (
-        <div className="space-y-4">
-          <div className="flex items-center gap-2">
-            <h2 className="kicker text-muted-foreground/70">
-              {connectedChannels.length === 0 ? 'Available Channels' : 'Connect More Channels'}
-            </h2>
-            <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] font-semibold text-muted-foreground">
-              {availableToConnect.length}
-            </span>
-          </div>
-          <div className="space-y-3">{availableToConnect.map(renderChannelCard)}</div>
-        </div>
-      )}
-
-      {/* Security banner */}
-      <div className="flex flex-wrap items-center justify-between gap-4 rounded-[18px] border border-border bg-card p-5 shadow-card">
-        <div className="flex items-center gap-4">
-          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-emerald-50">
-            <Lock className="h-5 w-5 text-emerald-600" strokeWidth={2.2} />
-          </div>
-          <div>
-            <p className="text-[14px] font-semibold text-foreground">Your connections are secure</p>
-            <p className="text-[12.5px] text-muted-foreground">
-              We use industry-standard encryption to keep your data safe and private.
-            </p>
-          </div>
-        </div>
-        <a
-          href="https://help.dealerintelligence.os/security"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="inline-flex items-center gap-1.5 text-[13px] font-semibold text-[var(--brand)] transition hover:opacity-80"
-        >
-          Learn More
-          <ExternalLink className="h-3.5 w-3.5" />
-        </a>
-      </div>
-
-      {/* Secondary note — why Instagram routes through Meta/Facebook */}
-      <details className="rounded-[14px] border border-border bg-muted/30 p-4">
-        <summary className="cursor-pointer list-none text-[12px] font-semibold text-muted-foreground [&::-webkit-details-marker]:hidden">
-          Why Facebook login for Instagram?
-        </summary>
-        <p className="mt-2 text-[11.5px] leading-relaxed text-muted-foreground">
-          Instagram removed its own OAuth in 2020. Authentication now goes through Meta (Facebook):
-          you log in with Facebook, authorize your Facebook Page, and the Instagram Business Account
-          linked to that Page is automatically connected. Your Instagram account must be a{' '}
-          <strong>Business or Creator account</strong> linked to a Facebook Page via Meta Business Suite.
-          Set{' '}
-          <code className="rounded bg-muted px-1 font-mono text-[10px]">FACEBOOK_APP_ID</code> and{' '}
-          <code className="rounded bg-muted px-1 font-mono text-[10px]">FACEBOOK_APP_SECRET</code> in{' '}
-          <code className="rounded bg-muted px-1 font-mono text-[10px]">apps/api/.env</code>.
-          Facebook, Google Business, and WhatsApp coming soon.
-        </p>
-      </details>
     </div>
   )
 }

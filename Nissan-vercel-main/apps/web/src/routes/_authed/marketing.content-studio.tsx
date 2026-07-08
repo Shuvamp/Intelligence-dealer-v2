@@ -1195,7 +1195,7 @@ function ContentStudio() {
                                 )
                               ) : (
                                 <Link
-                                  to="/connected-channels"
+                                  to="/channels"
                                   search={{} as any}
                                   onClick={(e) => e.stopPropagation()}
                                   className="shrink-0 inline-flex items-center gap-1 rounded-[8px] border border-[#C3002F]/30 bg-[#FFF0F3] px-2 py-1 text-[10px] font-semibold text-[#C3002F] hover:bg-[#FFE0E6] transition"

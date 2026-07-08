@@ -46,7 +46,7 @@ export const NAV_ITEMS: Array<NavItem> = [
     ],
   },
   { label: 'Intelligence', to: '/intelligence', icon: LineChart, minPlan: 'intelligence', group: 'main' },
-  { label: 'Connected Channels', to: '/connected-channels', icon: Link2, minPlan: 'intelligence', group: 'main' },
+  { label: 'Channels', to: '/channels', icon: Link2, minPlan: 'intelligence', group: 'main' },
   { label: 'Copilot', to: '/copilot', icon: Sparkles, minPlan: 'intelligence', group: 'main' },
   { label: 'Pipeline Log', to: '/pipeline-log', icon: Activity, minPlan: 'starter', group: 'system' },
   { label: 'Reports', to: '/reports', icon: FileBarChart, minPlan: 'growth', group: 'system' },
