@@ -29,8 +29,8 @@ import type {ReportData, ReportResult} from '#/lib/report-generator';
 import type { ContextResult } from '#/lib/context-planner'
 import { Badge, Button, Panel, PanelHeader } from '#/components/ui/kit'
 import {
-  AnalyzeGlyph, BusinessInfoCard, CheckPanel, PipelineStepper, RecommendationCard, ScoreGauge,
-  scoreTone    
+  AdvicePanel, AnalyzeGlyph, BusinessInfoCard, PipelineStepper, RecommendationCard, ScoreGauge,
+  scoreTone
 } from './analysis-ui'
 import type {BusinessInfoData, CheckItem, RecommendationView, StepperStage} from './analysis-ui';
 
@@ -418,19 +418,21 @@ function ResultsView({
         </Panel>
       ) : null}
 
-      {/* SEO + AEO — full-width, verdict-first */}
+      {/* SEO + AEO — one friendly AI summary each (full detail lives in the export) */}
       <div className="no-print space-y-5">
-        <CheckPanel
+        <AdvicePanel
           kicker="Search Engine Optimization"
           title={`SEO — ${seo.summary.overall_score}/100`}
           headerBadge={<Badge tone={scoreTone(seo.summary.overall_score)}>{seo.summary.grade}</Badge>}
+          summary={data?.seo_summary}
           items={seoChecks}
           delay={180}
         />
-        <CheckPanel
+        <AdvicePanel
           kicker="Answer Engine Optimization"
           title={`AEO — ${aeo.summary.aeo_score}/100`}
           headerBadge={<Badge tone={scoreTone(aeo.summary.aeo_score)}>{aeo.summary.pass_count}/{aeo.agents.length}</Badge>}
+          summary={data?.aeo_summary}
           items={aeoChecks}
           delay={240}
         />
