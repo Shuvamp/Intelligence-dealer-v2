@@ -1,7 +1,14 @@
 import os
+from pathlib import Path
+
 from dotenv import load_dotenv
 
-load_dotenv()
+# Load apps/api/.env by ABSOLUTE path (config.py lives at apps/api/app/config.py,
+# so parent.parent is apps/api). A bare load_dotenv() searches upward from the
+# process CWD — which is the repo root under `npm run dev`, where there is no
+# .env — so keys (GROQ_API_KEY, etc.) silently came back empty. Explicit path
+# makes env loading independent of the working directory.
+load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 SUPABASE_URL: str = os.getenv("SUPABASE_URL", "http://localhost:54321")
 SUPABASE_SERVICE_KEY: str = os.getenv("SUPABASE_SERVICE_KEY", "")

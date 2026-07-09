@@ -111,7 +111,10 @@ function NavGroup({
 
 function ExpandableNavItem({ item }: { item: (typeof NAV_ITEMS)[number] }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname })
-  const isActive = pathname.startsWith('/marketing')
+  // Active when the current path is under this item's top-level section — derived
+  // from item.to so any expandable nav works (Marketing, Context Planner, …).
+  const base = `/${item.to.split('/')[1] ?? ''}`
+  const isActive = pathname === base || pathname.startsWith(`${base}/`)
   const [open, setOpen] = useState(isActive)
   const Icon = item.icon
 
