@@ -38,6 +38,7 @@ export const NAV_ITEMS: Array<NavItem> = [
     children: [
       { label: 'Analysis',           to: '/context-planner' },
       { label: 'Marketing Strategy', to: '/context-planner/marketing-strategy' },
+      { label: 'Budget Planner',     to: '/context-planner/budget-planner' },
     ],
   },
   { label: 'Customers', to: '/customers', icon: Users, minPlan: 'starter', group: 'main' },
