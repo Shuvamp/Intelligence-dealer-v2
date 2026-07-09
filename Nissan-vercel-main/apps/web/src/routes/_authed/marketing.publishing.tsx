@@ -320,7 +320,7 @@ function Publishing() {
             No connected channels available for publishing.
           </p>
           <Link
-            to="/marketing/connected-channels"
+            to="/channels"
             search={{} as any}
             className="flex items-center gap-1.5 rounded-[10px] bg-[#C3002F] px-3 py-1.5 text-[12px] font-semibold text-white hover:bg-[#a50027] transition"
           >

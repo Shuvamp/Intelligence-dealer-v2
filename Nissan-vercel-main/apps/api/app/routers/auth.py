@@ -54,7 +54,7 @@ from app.services.linkedin import (
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-_CHANNELS_PATH = "/marketing/connected-channels"
+_CHANNELS_PATH = "/connected-channels"
 
 
 def _front(suffix: str = "") -> str:

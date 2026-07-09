@@ -29,7 +29,7 @@ router = APIRouter()
 # TTL matches long-lived token (~60 days) but in-memory so clears on restart.
 _last_token: dict[str, str] = {}
 
-_CHANNELS_PATH = "/marketing/connected-channels"
+_CHANNELS_PATH = "/connected-channels"
 
 # ── Why Facebook login, not Instagram login? ──────────────────────────────────
 # Instagram removed its own OAuth in 2020. The only way to get an Instagram

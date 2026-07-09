@@ -1043,6 +1043,10 @@ const MOCK_CHANNEL_STATUS: Array<ChannelConnection> = [
   { channel: 'google_business', status: 'disconnected', handle: null, last_sync: null },
   { channel: 'whatsapp', status: 'disconnected', handle: null, last_sync: null },
   { channel: 'linkedin', status: 'disconnected', handle: null, last_sync: null },
+  { channel: 'x', status: 'disconnected', handle: null, last_sync: null },
+  { channel: 'youtube', status: 'disconnected', handle: null, last_sync: null },
+  { channel: 'telegram', status: 'disconnected', handle: null, last_sync: null },
+  { channel: 'threads', status: 'disconnected', handle: null, last_sync: null },
 ]
 
 /**
