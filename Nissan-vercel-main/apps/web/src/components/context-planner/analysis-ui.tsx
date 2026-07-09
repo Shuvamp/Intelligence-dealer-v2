@@ -82,9 +82,10 @@ export function ScoreGauge({
 }
 
 // ---------------------------------------------------------------------------
-// Check panel — collapses SEO/AEO detail to a binary verdict per area:
-// "Needs improvement" items surface an AI suggestion; the rest fold into a
-// single "Good to go" chip row. Deliberately hides the pass/warn/fail noise.
+// Advice panel — one friendly AI summary per section instead of a list of
+// per-check explanations. Uses the report's AI narrative when present, else a
+// composed friendly line; celebrates when everything already passes. The full
+// per-check detail is preserved in the export (PDF/JSON/Markdown), not here.
 // ---------------------------------------------------------------------------
 export interface CheckItem {
   name: string
@@ -92,68 +93,52 @@ export interface CheckItem {
   action?: string
 }
 
-export function CheckPanel({
-  kicker, title, headerBadge, items, delay = 0,
+export function AdvicePanel({
+  kicker, title, headerBadge, summary, items, delay = 0,
 }: {
   kicker: string
   title: string
   headerBadge?: ReactNode
+  summary?: string | null
   items: Array<CheckItem>
   delay?: number
 }) {
   const needs = items.filter((i) => i.status !== 'PASS')
-  const good = items.filter((i) => i.status === 'PASS')
+  const allGood = needs.length === 0
+  const text =
+    summary && summary.trim()
+      ? summary.trim()
+      : allGood
+        ? 'Great news — everything here looks good. No changes needed right now.'
+        : `A few areas could lift your score: ${needs.map((n) => n.name).join(', ')}. Tackle these and you'll see a noticeable improvement.`
 
   return (
     <Panel className="fade-up overflow-hidden" style={{ animationDelay: `${delay}ms` }}>
       <PanelHeader kicker={kicker} title={title} action={headerBadge} />
-      <div className="space-y-2.5 px-5 py-4">
-        {needs.length === 0 ? (
-          <div className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-[13px] font-medium text-emerald-700">
-            <CheckCircle2 className="h-4 w-4 shrink-0" /> Everything here is good to go.
+      <div className="px-5 py-4">
+        <div
+          className={cn(
+            'flex gap-3 rounded-lg border px-4 py-3.5',
+            allGood ? 'border-emerald-200 bg-emerald-50' : 'border-border bg-muted/40',
+          )}
+        >
+          <span
+            className={cn(
+              'mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-lg',
+              allGood
+                ? 'bg-emerald-100 text-emerald-600'
+                : 'bg-[color-mix(in_oklab,var(--brand)_12%,transparent)] text-[var(--brand)]',
+            )}
+          >
+            {allGood ? <CheckCircle2 className="h-4 w-4" /> : <Sparkles className="h-4 w-4" />}
+          </span>
+          <div>
+            <div className="kicker text-muted-foreground/70">{allGood ? 'Looking good' : 'AI advice'}</div>
+            <p className="mt-1 text-[13px] leading-relaxed text-foreground">{text}</p>
           </div>
-        ) : (
-          needs.map((c) => (
-            <div key={c.name} className="rounded-lg border border-border bg-card px-4 py-3">
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-[13px] font-semibold text-foreground">{c.name}</span>
-                <Badge tone={c.status === 'FAIL' ? 'rose' : 'amber'}>Needs improvement</Badge>
-              </div>
-              {c.action ? (
-                <p className="mt-2 flex items-start gap-1.5 text-[12.5px] leading-relaxed text-muted-foreground">
-                  <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[var(--brand)]" />
-                  <span>{c.action}</span>
-                </p>
-              ) : null}
-            </div>
-          ))
-        )}
-        {good.length > 0 ? <GoodToGoRow names={good.map((g) => g.name)} /> : null}
+        </div>
       </div>
     </Panel>
-  )
-}
-
-function GoodToGoRow({ names }: { names: Array<string> }) {
-  const [open, setOpen] = useState(false)
-  return (
-    <div className="overflow-hidden rounded-lg border border-border">
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        className="flex w-full items-center gap-2 px-4 py-2.5 text-left transition hover:bg-muted/40"
-      >
-        <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-500" />
-        <span className="text-[13px] font-semibold text-foreground">Good to go</span>
-        <Badge tone="emerald">{names.length}</Badge>
-        <ChevronDown className={cn('ml-auto h-4 w-4 shrink-0 text-muted-foreground transition-transform', open && 'rotate-180')} />
-      </button>
-      {open ? (
-        <div className="flex flex-wrap gap-1.5 border-t border-border px-4 py-3">
-          {names.map((n) => <Badge key={n} tone="neutral">{n}</Badge>)}
-        </div>
-      ) : null}
-    </div>
   )
 }
 

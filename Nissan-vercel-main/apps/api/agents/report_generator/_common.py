@@ -172,46 +172,44 @@ def _website_summary(website_json: dict) -> str:
     return text
 
 
-def _seo_summary(seo_data: dict) -> str:
-    s = seo_data.get("summary") or {}
-    score = s.get("overall_score", 0)
-    grade = s.get("grade", "F")
-    p = s.get("pass_count", 0)
-    w = s.get("warning_count", 0)
-    f = s.get("fail_count", 0)
-    fails = [d.get("dimension") for d in (seo_data.get("dimensions") or []) if d.get("status") == "FAIL"]
+# seo_summary / aeo_summary read as friendly, actionable advice spoken to the
+# owner (not a stats recap) — matching the Groq prompt, so the on-screen "AI
+# advice" panel stays consistent whether or not a key is configured.
 
-    text = (
-        f"The SEO analysis scored {score}/100 (grade {grade}) across "
-        f"{p + w + f} dimensions: {p} passed, {w} warning(s), {f} failure(s). "
+def _seo_summary(seo_data: dict) -> str:
+    dims = seo_data.get("dimensions") or []
+    fails = [d.get("dimension") for d in dims if d.get("status") == "FAIL"]
+    warns = [d.get("dimension") for d in dims if d.get("status") == "WARNING"]
+    focus = [d for d in (fails + warns) if d][:5]
+
+    if not focus:
+        return (
+            "Your website's SEO is in great shape — search engines can find, read, and rank "
+            "your pages well. Keep publishing fresh, relevant content and you'll stay ahead."
+        )
+    return (
+        "To help more customers find you on Google, focus on these areas next: "
+        + ", ".join(focus)
+        + ". Tightening these up will make your site easier to discover and rank higher in search results."
     )
-    if fails:
-        text += "Failing areas: " + ", ".join(fails) + "."
-    else:
-        text += "No outright failures were found."
-    return text
 
 
 def _aeo_summary(aeo_data: dict) -> str:
-    s = aeo_data.get("summary") or {}
-    score = s.get("aeo_score", 0)
-    p = s.get("pass_count", 0)
-    w = s.get("warning_count", 0)
-    f = s.get("fail_count", 0)
-    strengths = aeo_data.get("strengths") or []
     weaknesses = aeo_data.get("weaknesses") or []
-    weak_agents = [wk.get("agent") for wk in weaknesses if wk.get("agent")]
+    weak_agents = [wk.get("agent") for wk in weaknesses if wk.get("agent")][:5]
 
-    text = (
-        f"The AEO (Answer Engine Optimization) analysis scored {score}/100 across "
-        f"{p + w + f} agents: {p} passed, {w} warning(s), {f} failure(s), yielding "
-        f"{len(strengths)} strength(s) and {len(weaknesses)} weakness(es). "
+    if not weak_agents:
+        return (
+            "Great news — AI assistants like ChatGPT and Google's AI Overviews can already "
+            "understand and recommend your business clearly. Keep your content structured and "
+            "factual to stay AI-friendly."
+        )
+    return (
+        "To get recommended more often by AI assistants (ChatGPT, Perplexity, Google AI), work on: "
+        + ", ".join(weak_agents)
+        + ". Adding clear structured data, a solid FAQ, and factual descriptions helps AI confidently "
+        "describe and suggest your business."
     )
-    if weak_agents:
-        text += "Areas needing work: " + ", ".join(weak_agents) + "."
-    else:
-        text += "No weaknesses were identified."
-    return text
 
 
 # ── Structured-section assembly (always deterministic) ───────────────────────
