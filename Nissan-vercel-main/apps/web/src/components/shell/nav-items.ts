@@ -11,6 +11,7 @@ import {
   BarChart3,
   Activity,
   Compass,
+  Link2,
   type LucideIcon,
 } from 'lucide-react'
 import type { SubscriptionPlan } from '#/lib/types'
@@ -32,7 +33,13 @@ export interface NavItem {
 // Order tells the platform story: Customer -> Lead -> Campaign -> Insight -> Copilot.
 export const NAV_ITEMS: Array<NavItem> = [
   { label: 'Dashboard', to: '/dashboard', icon: LayoutDashboard, minPlan: 'starter', group: 'main' },
-  { label: 'Context Planner', to: '/context-planner', icon: Compass, minPlan: 'intelligence', group: 'main' },
+  {
+    label: 'Context Planner', to: '/context-planner', icon: Compass, minPlan: 'intelligence', group: 'main',
+    children: [
+      { label: 'Analysis',           to: '/context-planner' },
+      { label: 'Marketing Strategy', to: '/context-planner/marketing-strategy' },
+    ],
+  },
   { label: 'Customers', to: '/customers', icon: Users, minPlan: 'starter', group: 'main' },
   { label: 'Leads', to: '/leads', icon: Target, minPlan: 'starter', group: 'main' },
   { label: 'Assignments', to: '/assignments', icon: BarChart3, minPlan: 'starter', group: 'main' },
@@ -44,10 +51,10 @@ export const NAV_ITEMS: Array<NavItem> = [
       { label: 'Content Studio',     to: '/marketing/content-studio' },
       { label: 'Publishing',         to: '/marketing/publishing' },
       { label: 'Media Library',      to: '/marketing/media-library' },
-      { label: 'Connected Channels', to: '/marketing/connected-channels' },
     ],
   },
   { label: 'Intelligence', to: '/intelligence', icon: LineChart, minPlan: 'intelligence', group: 'main' },
+  { label: 'Channels', to: '/channels', icon: Link2, minPlan: 'intelligence', group: 'main' },
   { label: 'Copilot', to: '/copilot', icon: Sparkles, minPlan: 'intelligence', group: 'main' },
   { label: 'Pipeline Log', to: '/pipeline-log', icon: Activity, minPlan: 'starter', group: 'system' },
   { label: 'Reports', to: '/reports', icon: FileBarChart, minPlan: 'growth', group: 'system' },

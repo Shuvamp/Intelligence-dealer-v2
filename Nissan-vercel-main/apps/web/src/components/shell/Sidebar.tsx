@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { Link, useRouterState } from '@tanstack/react-router'
-import { Lock, Gauge, ChevronDown } from 'lucide-react'
+import { Lock, Gauge, ChevronDown, ChevronsUpDown } from 'lucide-react'
 import { NAV_ITEMS, planAllows } from './nav-items'
 import { cn } from '#/lib/utils'
 import type { Tenant } from '#/lib/types'
@@ -12,14 +12,14 @@ export function Sidebar({ tenant }: { tenant: Tenant }) {
   const system = NAV_ITEMS.filter((i) => i.group === 'system')
 
   return (
-    <aside className="flex h-full w-[252px] shrink-0 flex-col bg-sidebar text-sidebar-foreground">
+    <aside className="flex h-full w-[252px] shrink-0 flex-col border-r border-sidebar-border/50 bg-sidebar text-sidebar-foreground">
       {/* Brand */}
       <div className="flex items-center gap-3 px-5 py-5">
-        <div className="flex h-9 w-9 items-center justify-center rounded-lg brand-bg shadow-sm">
-          <Gauge className="h-5 w-5" strokeWidth={2.2} />
+        <div className="flex h-10 w-10 items-center justify-center rounded-xl brand-bg shadow-sm">
+          <Gauge className="h-[22px] w-[22px]" strokeWidth={2.2} />
         </div>
         <div className="leading-tight">
-          <div className="text-[13px] font-bold tracking-tight text-white">
+          <div className="text-[13.5px] font-bold tracking-tight text-white">
             Dealer Intelligence
           </div>
           <div className="text-[11px] text-sidebar-foreground/70">OS · {tenant.brand}</div>
@@ -31,8 +31,23 @@ export function Sidebar({ tenant }: { tenant: Tenant }) {
         <NavGroup label="System" items={system} plan={tenant.subscription_plan} />
       </nav>
 
-      <div className="px-5 py-4 text-[11px] text-sidebar-foreground/50">
-        <PlanChip plan={tenant.subscription_plan} /> plan
+      {/* Workspace selector */}
+      <div className="px-3 py-4">
+        <button
+          type="button"
+          className="flex w-full items-center gap-3 rounded-[12px] border border-sidebar-border/60 bg-sidebar-accent/40 px-3 py-2.5 text-left transition hover:bg-sidebar-accent/70"
+        >
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg brand-bg text-[12px] font-bold shadow-sm">
+            {tenant.brand?.[0]?.toUpperCase() ?? 'W'}
+          </div>
+          <div className="min-w-0 flex-1 leading-tight">
+            <div className="truncate text-[12.5px] font-semibold text-white">{tenant.brand}</div>
+            <div className="text-[10.5px] capitalize text-sidebar-foreground/60">
+              {tenant.subscription_plan} plan
+            </div>
+          </div>
+          <ChevronsUpDown className="h-4 w-4 shrink-0 text-sidebar-foreground/50" />
+        </button>
       </div>
     </aside>
   )
@@ -58,7 +73,7 @@ function NavGroup({
             return (
               <li key={item.to}>
                 <div
-                  className="flex cursor-not-allowed items-center gap-3 rounded-lg px-3 py-2 text-[13.5px] font-medium text-sidebar-foreground/35"
+                  className="flex cursor-not-allowed items-center gap-3 rounded-[12px] px-3 py-2 text-[13.5px] font-medium text-sidebar-foreground/35"
                   title={`Requires ${item.minPlan} plan`}
                 >
                   <Icon className="h-[18px] w-[18px]" strokeWidth={2} />
@@ -75,7 +90,7 @@ function NavGroup({
             <li key={item.to}>
               <Link
                 to={item.to}
-                className="group flex items-center gap-3 rounded-lg px-3 py-2 text-[13.5px] font-medium text-sidebar-foreground/80 transition hover:bg-sidebar-accent hover:text-white"
+                className="group flex items-center gap-3 rounded-[12px] px-3 py-2 text-[13.5px] font-medium text-sidebar-foreground/80 transition-all duration-150 hover:bg-sidebar-accent/70 hover:text-white"
                 activeProps={{
                   className: cn(
                     'bg-sidebar-accent text-white',
@@ -96,7 +111,10 @@ function NavGroup({
 
 function ExpandableNavItem({ item }: { item: (typeof NAV_ITEMS)[number] }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname })
-  const isActive = pathname.startsWith('/marketing')
+  // Active when the current path is under this item's top-level section — derived
+  // from item.to so any expandable nav works (Marketing, Context Planner, …).
+  const base = `/${item.to.split('/')[1] ?? ''}`
+  const isActive = pathname === base || pathname.startsWith(`${base}/`)
   const [open, setOpen] = useState(isActive)
   const Icon = item.icon
 
@@ -107,7 +125,7 @@ function ExpandableNavItem({ item }: { item: (typeof NAV_ITEMS)[number] }) {
           to={item.to}
           onClick={() => setOpen(true)}
           className={cn(
-            'flex flex-1 items-center gap-3 rounded-lg px-3 py-2 text-[13.5px] font-medium transition hover:bg-sidebar-accent hover:text-white',
+            'flex flex-1 items-center gap-3 rounded-[12px] px-3 py-2 text-[13.5px] font-medium transition-all duration-150 hover:bg-sidebar-accent/70 hover:text-white',
             isActive
               ? 'bg-sidebar-accent text-white relative before:absolute before:left-0 before:top-1/2 before:h-5 before:w-[3px] before:-translate-y-1/2 before:rounded-full before:bg-[var(--brand)]'
               : 'text-sidebar-foreground/80',
@@ -133,7 +151,7 @@ function ExpandableNavItem({ item }: { item: (typeof NAV_ITEMS)[number] }) {
             <li key={child.to}>
               <Link
                 to={child.to}
-                className="flex items-center rounded-md px-3 py-1.5 text-[12.5px] font-medium text-sidebar-foreground/70 transition hover:bg-sidebar-accent hover:text-white"
+                className="flex items-center rounded-[10px] px-3 py-1.5 text-[12.5px] font-medium text-sidebar-foreground/70 transition-all duration-150 hover:bg-sidebar-accent/70 hover:text-white"
                 activeOptions={{ exact: true }}
                 activeProps={{ className: 'text-white bg-sidebar-accent/60' }}
               >
@@ -144,11 +162,5 @@ function ExpandableNavItem({ item }: { item: (typeof NAV_ITEMS)[number] }) {
         </ul>
       )}
     </li>
-  )
-}
-
-function PlanChip({ plan }: { plan: Tenant['subscription_plan'] }) {
-  return (
-    <span className="font-semibold capitalize text-sidebar-foreground/80">{plan}</span>
   )
 }
