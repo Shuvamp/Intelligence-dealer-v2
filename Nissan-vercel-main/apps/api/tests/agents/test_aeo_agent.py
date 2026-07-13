@@ -22,6 +22,7 @@ from agents.aeo_agent.nodes import (
     analyze_question_detection,
     analyze_schema_analysis,
     analyze_trust_analysis,
+    llm_semantic_analysis_node,
     load_extraction_node,
     validator_node,
 )
@@ -172,6 +173,41 @@ def test_answer_quality_passes_with_caveat():
     assert len(r["recommendations"]) == 1  # caveat present even on PASS
 
 
+def test_answer_quality_prefers_llm_semantic_when_present():
+    extraction = {**GOOD_EXTRACTION, "_llm_semantic": {"Answer Quality": {"agent": "Answer Quality", "status": "FAIL", "recommendations": []}}}
+    assert analyze_answer_quality(extraction)["status"] == "FAIL"
+
+
+# ---- llm_semantic_analysis_node: no-op without a configured LLM key ---------------
+
+def test_llm_semantic_node_noop_without_llm_key(monkeypatch):
+    monkeypatch.setattr("agents.aeo_agent.nodes.has_llm", lambda: False)
+    assert llm_semantic_analysis_node({"extraction_data": GOOD_EXTRACTION}) == {}
+
+
+def test_llm_semantic_node_noop_without_extraction_data():
+    assert llm_semantic_analysis_node({"extraction_data": None}) == {}
+
+
+def test_llm_semantic_node_falls_back_on_malformed_llm_response(monkeypatch):
+    monkeypatch.setattr("agents.aeo_agent.nodes._llm_cache", {})  # content-hash cache is process-lifetime — isolate per test
+    monkeypatch.setattr("agents.aeo_agent.nodes.has_llm", lambda: True)
+    monkeypatch.setattr("agents.aeo_agent.nodes.llm_json", lambda *a, **k: {"not": "the expected shape"})
+    assert llm_semantic_analysis_node({"extraction_data": GOOD_EXTRACTION}) == {}
+
+
+def test_llm_semantic_node_merges_valid_response(monkeypatch):
+    monkeypatch.setattr("agents.aeo_agent.nodes._llm_cache", {})  # content-hash cache is process-lifetime — isolate per test
+    monkeypatch.setattr("agents.aeo_agent.nodes.has_llm", lambda: True)
+    monkeypatch.setattr("agents.aeo_agent.nodes.llm_json", lambda *a, **k: {
+        "Citation Analysis": {"status": "PASS", "recommendations": [
+            {"why_ai_may_fail": "x", "how_to_improve": "y", "expected_impact": "low"}
+        ]},
+    })
+    out = llm_semantic_analysis_node({"extraction_data": GOOD_EXTRACTION})
+    assert out["extraction_data"]["_llm_semantic"]["Citation Analysis"]["status"] == "PASS"
+
+
 # ---- FAQ Analysis -----------------------------------------------------------
 
 def test_faq_analysis_warns_when_empty():
@@ -193,6 +229,11 @@ def test_citation_analysis_always_warning():
     r = analyze_citation_analysis(GOOD_EXTRACTION)
     assert r["status"] == "WARNING"
     assert "cite" in r["recommendations"][0]["why_ai_may_fail"].lower()
+
+
+def test_citation_analysis_prefers_llm_semantic_when_present():
+    extraction = {**GOOD_EXTRACTION, "_llm_semantic": {"Citation Analysis": {"agent": "Citation Analysis", "status": "PASS", "recommendations": []}}}
+    assert analyze_citation_analysis(extraction)["status"] == "PASS"
 
 
 # ---- Schema Analysis -----------------------------------------------------------
@@ -225,6 +266,11 @@ def test_ai_readability_passes_with_caveat():
     r = analyze_ai_readability(GOOD_EXTRACTION)
     assert r["status"] == "PASS"
     assert len(r["recommendations"]) == 1  # caveat present even on PASS
+
+
+def test_ai_readability_prefers_llm_semantic_when_present():
+    extraction = {**GOOD_EXTRACTION, "_llm_semantic": {"AI Readability": {"agent": "AI Readability", "status": "FAIL", "recommendations": []}}}
+    assert analyze_ai_readability(extraction)["status"] == "FAIL"
 
 
 # ---- Content Chunking -----------------------------------------------------------
@@ -272,6 +318,11 @@ def test_llm_readability_passes_with_caveat():
     r = analyze_llm_readability(GOOD_EXTRACTION)
     assert r["status"] == "PASS"
     assert len(r["recommendations"]) == 1  # caveat present even on PASS
+
+
+def test_llm_readability_prefers_llm_semantic_when_present():
+    extraction = {**GOOD_EXTRACTION, "_llm_semantic": {"LLM Readability": {"agent": "LLM Readability", "status": "WARNING", "recommendations": []}}}
+    assert analyze_llm_readability(extraction)["status"] == "WARNING"
 
 
 # ---- Brand Context -----------------------------------------------------------
@@ -365,9 +416,14 @@ def test_validator_fails_on_schema_mismatch():
 # ---- full graph run (network-free, mirrors seo_agent's approach) -----------
 
 @pytest.mark.asyncio
-async def test_full_graph_run_produces_11_agents():
+async def test_full_graph_run_produces_11_agents(monkeypatch):
     from agents.aeo_agent.graph import AEOAnalysisGraph
     from agents.aeo_agent.service import _initial_state
+
+    # Network-free regardless of local .env contents — this is also the
+    # "all keys unset" env-var-matrix check: output must be identical to
+    # pre-hybrid-change behavior when no LLM is configured.
+    monkeypatch.setattr("agents.aeo_agent.nodes.has_llm", lambda: False)
 
     initial = _initial_state("a1", "t1", "c1", "e1", GOOD_EXTRACTION)
     final = await AEOAnalysisGraph.ainvoke(initial)

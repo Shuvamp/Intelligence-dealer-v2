@@ -87,6 +87,14 @@ GOOD_EXTRACTION = {
         "has_ssl": True, "has_privacy_policy": True, "has_terms": True,
         "certifications": ["ISO 9001"], "testimonials_count": 5,
     },
+    "links": {
+        "internal_count": 12, "external_count": 2,
+        "internal": [
+            {"href": "https://example.com/about", "text": "About ABC Nissan", "source_page": "https://example.com/"},
+            {"href": "https://example.com/contact", "text": "Contact us", "source_page": "https://example.com/"},
+        ],
+        "external": [{"href": "https://nissan.com", "text": "Nissan Global", "source_page": "https://example.com/"}],
+    },
 }
 
 EMPTY_EXTRACTION: dict = {}
@@ -208,6 +216,27 @@ def test_core_web_vitals_always_warning():
     assert analyze_core_web_vitals(GOOD_EXTRACTION)["status"] == "WARNING"
 
 
+def test_performance_uses_pagespeed_when_present():
+    extraction = {**GOOD_EXTRACTION, "_pagespeed": {"performance_score": 95, "source": "lab"}}
+    r = analyze_performance(extraction)
+    assert r["status"] == "PASS"
+
+
+def test_performance_fails_on_low_score():
+    extraction = {**GOOD_EXTRACTION, "_pagespeed": {"performance_score": 30, "source": "field"}}
+    assert analyze_performance(extraction)["status"] == "FAIL"
+
+
+def test_core_web_vitals_uses_pagespeed_when_present():
+    extraction = {**GOOD_EXTRACTION, "_pagespeed": {"lcp_s": 1.5, "cls": 0.05, "inp_ms": 100, "source": "field"}}
+    assert analyze_core_web_vitals(extraction)["status"] == "PASS"
+
+
+def test_core_web_vitals_fails_on_poor_metrics():
+    extraction = {**GOOD_EXTRACTION, "_pagespeed": {"lcp_s": 5.0, "cls": 0.3, "inp_ms": 600, "source": "field"}}
+    assert analyze_core_web_vitals(extraction)["status"] == "FAIL"
+
+
 def test_security_fails_without_ssl():
     assert analyze_security({"trust": {"has_ssl": False}})["status"] == "FAIL"
 
@@ -236,8 +265,18 @@ def test_content_analysis_passes_with_signal():
     assert analyze_content_analysis(GOOD_EXTRACTION)["status"] == "PASS"
 
 
+def test_content_analysis_prefers_llm_semantic_when_present():
+    extraction = {**GOOD_EXTRACTION, "_llm_semantic": {"Content Analysis": {"dimension": "Content Analysis", "status": "FAIL", "recommendations": []}}}
+    assert analyze_content_analysis(extraction)["status"] == "FAIL"
+
+
 def test_keyword_analysis_always_warning():
     assert analyze_keyword_analysis(GOOD_EXTRACTION)["status"] == "WARNING"
+
+
+def test_keyword_analysis_prefers_llm_semantic_when_present():
+    extraction = {**GOOD_EXTRACTION, "_llm_semantic": {"Keyword Analysis": {"dimension": "Keyword Analysis", "status": "PASS", "recommendations": []}}}
+    assert analyze_keyword_analysis(extraction)["status"] == "PASS"
 
 
 def test_blog_warns_when_absent():
@@ -271,14 +310,46 @@ def test_accessibility_passes_on_good_coverage():
 
 # ---- links_media ------------------------------------------------------------------
 
-def test_internal_links_always_warning():
-    r = analyze_internal_links(GOOD_EXTRACTION)
+def test_internal_links_fails_on_zero():
+    r = analyze_internal_links({"links": {"internal_count": 0}, "website": {}})
+    assert r["status"] == "FAIL"
+
+
+def test_internal_links_warns_on_low_density():
+    extraction = {
+        "links": {"internal_count": 1, "internal": []},
+        "website": {"pages_crawled": ["a", "b", "c"]},
+    }
+    assert analyze_internal_links(extraction)["status"] == "WARNING"
+
+
+def test_internal_links_warns_on_generic_anchor_text():
+    extraction = {
+        "links": {
+            "internal_count": 10,
+            "internal": [{"href": f"https://example.com/{i}", "text": "click here"} for i in range(5)],
+        },
+        "website": {"pages_crawled": ["a"]},
+    }
+    assert analyze_internal_links(extraction)["status"] == "WARNING"
+
+
+def test_internal_links_passes_on_good_data():
+    assert analyze_internal_links(GOOD_EXTRACTION)["status"] == "PASS"
+
+
+def test_external_links_warns_on_zero():
+    r = analyze_external_links({"links": {"internal_count": 5, "external_count": 0}})
     assert r["status"] == "WARNING"
-    assert "link graph" in r["recommendations"][0]["reason"].lower()
 
 
-def test_external_links_always_warning():
-    assert analyze_external_links(GOOD_EXTRACTION)["status"] == "WARNING"
+def test_external_links_warns_on_external_heavy_profile():
+    extraction = {"links": {"internal_count": 2, "external_count": 10}}
+    assert analyze_external_links(extraction)["status"] == "WARNING"
+
+
+def test_external_links_passes_on_balanced_profile():
+    assert analyze_external_links(GOOD_EXTRACTION)["status"] == "PASS"
 
 
 def test_images_fails_on_none():
@@ -319,8 +390,18 @@ def test_brand_authority_always_warning():
     assert analyze_brand_authority(GOOD_EXTRACTION)["status"] == "WARNING"
 
 
+def test_brand_authority_prefers_llm_semantic_when_present():
+    extraction = {**GOOD_EXTRACTION, "_llm_semantic": {"Brand Authority": {"dimension": "Brand Authority", "status": "PASS", "recommendations": []}}}
+    assert analyze_brand_authority(extraction)["status"] == "PASS"
+
+
 def test_conversion_optimization_always_warning():
     assert analyze_conversion_optimization(GOOD_EXTRACTION)["status"] == "WARNING"
+
+
+def test_conversion_optimization_prefers_llm_semantic_when_present():
+    extraction = {**GOOD_EXTRACTION, "_llm_semantic": {"Conversion Optimization": {"dimension": "Conversion Optimization", "status": "FAIL", "recommendations": []}}}
+    assert analyze_conversion_optimization(extraction)["status"] == "FAIL"
 
 
 # ---- build.py: load_extraction / aggregate / validator ------------------------------
@@ -379,9 +460,14 @@ def test_validator_fails_on_schema_mismatch():
 # ---- full graph run (network-free, mirrors website_extraction's approach) -----------
 
 @pytest.mark.asyncio
-async def test_full_graph_run_produces_24_dimensions():
+async def test_full_graph_run_produces_24_dimensions(monkeypatch):
     from agents.seo_agent.graph import SEOAnalysisGraph
     from agents.seo_agent.service import _initial_state
+
+    # Network-free regardless of local .env contents — this is also the
+    # "all keys unset" env-var-matrix check: output must be identical to
+    # pre-hybrid-change behavior when no LLM is configured.
+    monkeypatch.setattr("agents.seo_agent.nodes.llm_semantic.has_llm", lambda: False)
 
     initial = _initial_state("a1", "t1", "c1", "e1", GOOD_EXTRACTION)
     final = await SEOAnalysisGraph.ainvoke(initial)

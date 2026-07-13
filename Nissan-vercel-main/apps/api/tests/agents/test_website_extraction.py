@@ -24,7 +24,7 @@ from agents.website_extraction.nodes.extract import (
     service_extractor_node,
 )
 from agents.website_extraction.nodes.fetch import _is_disallowed_ip, _same_scope
-from agents.website_extraction.nodes.parse import _parse_one, classify_page
+from agents.website_extraction.nodes.parse import _parse_one, classify_page, link_graph_node, navigation_parser_node
 
 
 # ---- SSRF / scope guards (fetch.py) -----------------------------------------
@@ -131,6 +131,70 @@ def test_parse_one_heading_blocks_pair_heading_with_following_text():
     blocks = {b["heading"]: b["text"] for b in page["heading_blocks"]}
     assert blocks["Magnite"] == "A compact SUV built for the city."
     assert blocks["Kicks"] == "A bold crossover SUV."
+
+
+# ---- navigation_parser_node: text_excerpt / headings persistence -----------
+
+def test_navigation_parser_node_includes_text_excerpt_and_headings():
+    page = _parse_one("https://example.com/", SAMPLE_HTML)
+    state = {"parsed_pages": {"https://example.com/": page}, "final_url": "https://example.com/"}
+    result = navigation_parser_node(state)
+    entry = result["pages"][0]
+    assert entry["text_excerpt"] and "Welcome" in entry["text_excerpt"]
+    assert "Magnite" in entry["headings"]
+
+
+def test_navigation_parser_node_caps_text_excerpt_length():
+    long_html = "<html><body>" + ("word " * 1000) + "</body></html>"
+    page = _parse_one("https://example.com/", long_html)
+    state = {"parsed_pages": {"https://example.com/": page}, "final_url": "https://example.com/"}
+    result = navigation_parser_node(state)
+    assert len(result["pages"][0]["text_excerpt"]) <= 2000
+
+
+# ---- link_graph_node (parse.py) ---------------------------------------------
+
+def test_link_graph_node_classifies_internal_and_external():
+    html = (
+        '<html><body>'
+        '<a href="/contact">Contact</a>'
+        '<a href="https://facebook.com/abcnissan">Facebook</a>'
+        '</body></html>'
+    )
+    page = _parse_one("https://example.com/", html)
+    state = {"parsed_pages": {"https://example.com/": page}, "seed_host": "example.com"}
+    result = link_graph_node(state)
+    links = result["links"]
+    assert links["internal_count"] == 1
+    assert links["external_count"] == 1
+    assert links["internal"][0]["href"] == "https://example.com/contact"
+    assert links["external"][0]["href"] == "https://facebook.com/abcnissan"
+
+
+def test_link_graph_node_excludes_mailto_and_tel():
+    page = _parse_one("https://example.com/", SAMPLE_HTML)  # has mailto: and tel: links
+    state = {"parsed_pages": {"https://example.com/": page}, "seed_host": "example.com"}
+    result = link_graph_node(state)
+    links = result["links"]
+    all_hrefs = {l["href"] for l in links["internal"] + links["external"]}
+    assert not any(h.startswith(("mailto:", "tel:")) for h in all_hrefs)
+
+
+def test_link_graph_node_dedupes_repeated_hrefs():
+    html = '<html><body><a href="/contact">Contact</a><a href="/contact">Contact us</a></body></html>'
+    page = _parse_one("https://example.com/", html)
+    state = {"parsed_pages": {"https://example.com/": page}, "seed_host": "example.com"}
+    result = link_graph_node(state)
+    assert result["links"]["internal_count"] == 1
+
+
+def test_link_graph_node_noop_without_seed_host():
+    page = _parse_one("https://example.com/", SAMPLE_HTML)
+    assert link_graph_node({"parsed_pages": {"https://example.com/": page}, "seed_host": None}) == {}
+
+
+def test_link_graph_node_noop_without_parsed_pages():
+    assert link_graph_node({"parsed_pages": {}, "seed_host": "example.com"}) == {}
 
 
 # ---- product / service extractors (extract.py) -----------------------------
@@ -313,6 +377,13 @@ def test_json_builder_collects_schema_markup_types_from_json_ld():
     state = _minimal_state(parsed_pages={"https://example.com/faq": page})
     data = json_builder_node(state)["extraction_data"]
     assert data["technical_seo"]["schema_markup_types"] == ["FAQPage"]
+
+
+def test_json_builder_copies_links_section():
+    links = {"internal_count": 3, "external_count": 1, "internal": [], "external": []}
+    state = _minimal_state(links=links)
+    data = json_builder_node(state)["extraction_data"]
+    assert data["links"] == links
 
 
 def test_validator_ready_when_pages_crawled_present():

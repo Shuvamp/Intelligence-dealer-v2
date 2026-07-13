@@ -1,13 +1,16 @@
 """SEO Agent — technical analyzers: Technical SEO, Schema, Performance,
 Core Web Vitals, Security.
 
-Performance and Core Web Vitals always return WARNING — Phase 2's static
-HTML extraction captures no runtime timing/rendering data at all, so a
-confident PASS/FAIL here would be fabricated. Security has only one weak
-signal (has_ssl) — a PASS still carries a caveat about what wasn't checked.
+Performance and Core Web Vitals fall back to WARNING when extraction["_pagespeed"]
+isn't present (fetch_pagespeed_node no-ops without PAGESPEED_API_KEY or on
+any PSI failure) — static HTML extraction alone captures no runtime timing/
+rendering data, so a confident PASS/FAIL without real telemetry would be
+fabricated. Security has only one weak signal (has_ssl) — a PASS still
+carries a caveat about what wasn't checked.
 """
 from __future__ import annotations
 
+from .pagespeed import cwv_status
 from ._common import always_warning, rec, result, worst
 
 
@@ -131,23 +134,83 @@ def analyze_schema(extraction: dict) -> dict:
 
 
 def analyze_performance(extraction: dict) -> dict:
-    return always_warning(
-        "Performance",
-        "Page-load performance cannot be assessed",
-        "This analysis is based on static HTML extraction; website.crawl_duration_ms reflects crawl "
-        "time, not real browser render/load time.",
-        "Run a Lighthouse or WebPageTest audit to measure actual page-load performance.",
+    pagespeed = extraction.get("_pagespeed")
+    score = pagespeed.get("performance_score") if pagespeed else None
+    if score is None:
+        return always_warning(
+            "Performance",
+            "Page-load performance cannot be assessed",
+            "This analysis is based on static HTML extraction; website.crawl_duration_ms reflects crawl "
+            "time, not real browser render/load time.",
+            "Run a Lighthouse or WebPageTest audit to measure actual page-load performance.",
+        )
+
+    source = pagespeed.get("source", "lab")
+    detail = (
+        f"Google PageSpeed Insights ({source} data) reports a mobile performance score of {score}/100."
     )
+    if score >= 90:
+        return result("Performance", "PASS", [rec(
+            "Performance score is well within Google's recommended range", detail,
+            "Keep monitoring performance after future changes.", "low", "low", "low",
+        )])
+    if score >= 50:
+        return result("Performance", "WARNING", [rec(
+            "Performance score has room for improvement", detail,
+            "Review the PageSpeed Insights diagnostics (image sizing, render-blocking resources, "
+            "server response time) for specific fixes.", "medium", "medium", "medium",
+        )])
+    return result("Performance", "FAIL", [rec(
+        "Performance score is poor", detail,
+        "Prioritize PageSpeed Insights' top opportunities — this is actively hurting both rankings and "
+        "conversion.", "high", "high", "medium",
+    )])
 
 
 def analyze_core_web_vitals(extraction: dict) -> dict:
-    return always_warning(
-        "Core Web Vitals",
-        "Core Web Vitals cannot be assessed",
-        "LCP, INP, and CLS require real-browser or Chrome UX Report (CrUX) field data, which is not "
-        "captured by static HTML extraction.",
-        "Use Google PageSpeed Insights or the CrUX dashboard to measure Core Web Vitals.",
-    )
+    pagespeed = extraction.get("_pagespeed")
+    status = cwv_status(
+        pagespeed.get("lcp_s") if pagespeed else None,
+        pagespeed.get("cls") if pagespeed else None,
+        pagespeed.get("inp_ms") if pagespeed else None,
+    ) if pagespeed else None
+
+    if status is None:
+        return always_warning(
+            "Core Web Vitals",
+            "Core Web Vitals cannot be assessed",
+            "LCP, INP, and CLS require real-browser or Chrome UX Report (CrUX) field data, which is not "
+            "captured by static HTML extraction.",
+            "Use Google PageSpeed Insights or the CrUX dashboard to measure Core Web Vitals.",
+        )
+
+    source = pagespeed.get("source", "lab")
+    lcp_s, cls, inp_ms = pagespeed.get("lcp_s"), pagespeed.get("cls"), pagespeed.get("inp_ms")
+    parts = []
+    if lcp_s is not None:
+        parts.append(f"LCP={lcp_s:.1f}s")
+    if cls is not None:
+        parts.append(f"CLS={cls:.2f}")
+    if inp_ms is not None:
+        parts.append(f"{'TBT' if source == 'lab' else 'INP'}={inp_ms:.0f}ms")
+    detail = f"Google PageSpeed Insights ({source} data): {', '.join(parts)}."
+
+    if status == "PASS":
+        return result("Core Web Vitals", "PASS", [rec(
+            "Core Web Vitals are within Google's 'good' thresholds", detail,
+            "Keep monitoring after future changes.", "low", "low", "low",
+        )])
+    if status == "WARNING":
+        return result("Core Web Vitals", "WARNING", [rec(
+            "One or more Core Web Vitals need improvement", detail,
+            "Target the specific metric(s) above — see web.dev/vitals for remediation guidance per metric.",
+            "medium", "medium", "medium",
+        )])
+    return result("Core Web Vitals", "FAIL", [rec(
+        "One or more Core Web Vitals are poor", detail,
+        "This directly affects Google's ranking signals and user experience — prioritize fixing the "
+        "worst metric first.", "high", "high", "medium",
+    )])
 
 
 def analyze_security(extraction: dict) -> dict:
