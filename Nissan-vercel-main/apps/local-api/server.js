@@ -393,6 +393,12 @@ async function initSchema() {
     status VARCHAR DEFAULT 'queued', report_data VARCHAR, markdown_content VARCHAR, overall_score INTEGER,
     errors VARCHAR DEFAULT '[]', created_at VARCHAR, updated_at VARCHAR, started_at VARCHAR, completed_at VARCHAR
   )`)
+  // Marketing Budget Planner category baselines (migration 0036). Global reference
+  // data (no tenant_id) — baseline monthly marketing spend in INR per category.
+  await run(`CREATE TABLE marketing_budget_benchmarks (
+    id VARCHAR PRIMARY KEY, category_key VARCHAR NOT NULL, base_inr INTEGER NOT NULL,
+    sort_order INTEGER DEFAULT 100, label VARCHAR, created_at VARCHAR, updated_at VARCHAR
+  )`)
 }
 
 // ─── Seed ─────────────────────────────────────────────────────────────────────
@@ -420,6 +426,25 @@ async function seed() {
   // Tenants
   await run(`INSERT INTO tenants VALUES (?,?,?,?,?,?)`, [ABC, 'ABC Nissan', 'Nissan', 'intelligence', 'active', JSON.stringify({ primary_color: '#C3002F', logo_url: null, theme: 'light' })])
   await run(`INSERT INTO tenants VALUES (?,?,?,?,?,?)`, [XYZ, 'XYZ Nissan', 'Nissan', 'growth', 'active', JSON.stringify({ primary_color: '#003366', logo_url: null, theme: 'light' })])
+
+  // Marketing budget category benchmarks (global reference data, migration 0036).
+  const benchmarks = [
+    ['automotive dealership', 150000,  1, 'Automotive dealership'],
+    ['dealership',            150000,  2, 'Dealership'],
+    ['automotive',            150000,  3, 'Automotive'],
+    ['ecommerce',             120000,  4, 'E-commerce'],
+    ['e-commerce',            120000,  5, 'E-commerce'],
+    ['retail',                100000,  6, 'Retail'],
+    ['real estate',           130000,  7, 'Real estate'],
+    ['hospitality',            90000,  8, 'Hospitality'],
+    ['healthcare',            110000,  9, 'Healthcare'],
+    ['education',              80000, 10, 'Education'],
+    ['services',               80000, 11, 'Services'],
+  ]
+  for (const [key, base, order, label] of benchmarks) {
+    await run(`INSERT INTO marketing_budget_benchmarks VALUES (?,?,?,?,?,?,?)`,
+      [uuidv4(), key, base, order, label, now, now])
+  }
 
   // Locations
   await run(`INSERT INTO locations VALUES (?,?,?,?)`, [LOC_VEL, ABC, 'ABC Nissan — Velachery', 'active'])

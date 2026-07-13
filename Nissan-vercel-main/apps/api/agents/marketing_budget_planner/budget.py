@@ -67,6 +67,9 @@ _TASK_IMPACT: dict[str, str] = {
 }
 
 # Baseline monthly spend by business category (INR). Matched by substring.
+# NOTE: the live values come from the `marketing_budget_benchmarks` table (see
+# data.get_category_benchmarks and migration 0036). This list is only a fallback
+# used when the table is unavailable or empty, so the planner never hard-fails.
 _CATEGORY_BASE: list[tuple[str, int]] = [
     ("automotive dealership", 150_000),
     ("dealership", 150_000),
@@ -109,20 +112,32 @@ def inr(n: int) -> str:
     return "₹" + rest + "," + last3
 
 
-def _base_for_category(category: str | None) -> int:
+def _base_for_category(
+    category: str | None, benchmarks: list[tuple[str, int]] | None = None
+) -> int:
+    """Baseline monthly spend for a category. Uses `benchmarks` (loaded from the
+    marketing_budget_benchmarks table) when provided, else the hardcoded fallback.
+    First substring match wins, so callers must pass benchmarks pre-ordered by
+    precedence (most specific key first)."""
+    table = benchmarks if benchmarks else _CATEGORY_BASE
     cat = (category or "").lower()
-    for key, base in _CATEGORY_BASE:
-        if key in cat:
+    for key, base in table:
+        if key and key in cat:
             return base
     return _DEFAULT_BASE
 
 
 # ── core steps ────────────────────────────────────────────────────────────────
-def derive_recommended(seo: float | int | None, aeo: float | int | None, category: str | None) -> int:
+def derive_recommended(
+    seo: float | int | None,
+    aeo: float | int | None,
+    category: str | None,
+    benchmarks: list[tuple[str, int]] | None = None,
+) -> int:
     """A weaker web presence needs more spend to close the gap. Scale the
     category baseline by the average score gap and round to a clean ₹5,000."""
     avg_gap = (_gap(seo) + _gap(aeo)) / 2.0
-    base = _base_for_category(category)
+    base = _base_for_category(category, benchmarks)
     recommended = base * (1.0 + 0.8 * avg_gap)
     return _round(recommended, 5_000)
 

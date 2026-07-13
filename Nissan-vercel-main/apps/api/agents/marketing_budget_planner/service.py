@@ -76,7 +76,10 @@ async def plan_budget(tenant_id: str, context_id: str, user_budget: int) -> dict
     aeo = overall.get("aeo_score")
     category = (summary or {}).get("industry") or context.get("industry")
 
-    recommended = budget.derive_recommended(seo, aeo, category)
+    # Category baselines live in the DB (migration 0036); None falls back to the
+    # hardcoded defaults in budget.py.
+    benchmarks = await _data.get_category_benchmarks()
+    recommended = budget.derive_recommended(seo, aeo, category, benchmarks)
     payload = llm.build_input(context, summary, report, recommended, user_budget)
 
     plan = budget.build_plan(payload)  # deterministic — owns every number
