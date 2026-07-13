@@ -9,10 +9,14 @@ from urllib.parse import urljoin, urlsplit
 from bs4 import BeautifulSoup
 
 from ..state import ParsedPage, WebsiteExtractionState
+from .fetch import _same_scope
 
 logger = logging.getLogger(__name__)
 
 _WHITESPACE_RE = re.compile(r"\s+")
+_MAX_TEXT_EXCERPT_CHARS = 2000
+_MAX_HEADINGS_PER_PAGE = 20
+_MAX_LINK_ENTRIES = 150
 
 # Shared page-type taxonomy — also used by extract.py to locate the
 # products/services pages to mine.
@@ -191,7 +195,44 @@ def navigation_parser_node(state: WebsiteExtractionState) -> dict:
             "url": url,
             "title": page["title"],
             "type": classify_page(url, link_text_by_url.get(url, "")),
+            "text_excerpt": page["text"][:_MAX_TEXT_EXCERPT_CHARS] or None,
+            "headings": page["headings"][:_MAX_HEADINGS_PER_PAGE],
         }
         for url, page in parsed_pages.items()
     ]
     return {"pages": pages}
+
+
+def link_graph_node(state: WebsiteExtractionState) -> dict:
+    """Classifies every link collected across crawled pages as internal/
+    external (deduped by href, mailto:/tel: excluded — those are contact
+    info, already handled by contact_extractor_node). internal_count/
+    external_count are true unique totals; the internal/external lists are
+    capped samples for downstream rule/LLM checks, not the real count."""
+    parsed_pages = state.get("parsed_pages", {})
+    seed_host = state.get("seed_host")
+    if not parsed_pages or not seed_host:
+        return {}
+
+    internal_by_href: dict[str, dict] = {}
+    external_by_href: dict[str, dict] = {}
+
+    for source_url, page in parsed_pages.items():
+        for link in page["links"]:
+            href = link["href"]
+            if href.startswith(("mailto:", "tel:")):
+                continue
+            host = urlsplit(href).hostname
+            if not host:
+                continue
+            bucket = internal_by_href if _same_scope(host, seed_host) else external_by_href
+            bucket.setdefault(href, {"href": href, "text": link.get("text") or None, "source_page": source_url})
+
+    return {
+        "links": {
+            "internal_count": len(internal_by_href),
+            "external_count": len(external_by_href),
+            "internal": list(internal_by_href.values())[:_MAX_LINK_ENTRIES],
+            "external": list(external_by_href.values())[:_MAX_LINK_ENTRIES],
+        }
+    }

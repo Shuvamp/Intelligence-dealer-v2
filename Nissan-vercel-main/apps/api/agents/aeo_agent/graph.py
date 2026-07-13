@@ -13,7 +13,13 @@ from __future__ import annotations
 from langgraph.graph import END, StateGraph
 
 from ._common import agent_result_key, build_node
-from .nodes import _ANALYZERS, aggregate_and_build_node, load_extraction_node, validator_node
+from .nodes import (
+    _ANALYZERS,
+    aggregate_and_build_node,
+    llm_semantic_analysis_node,
+    load_extraction_node,
+    validator_node,
+)
 from .schema import AGENT_NAMES
 from .state import AEOAnalysisState
 
@@ -26,6 +32,7 @@ def build_graph() -> StateGraph:
     g = StateGraph(AEOAnalysisState)
 
     g.add_node("load_extraction", load_extraction_node)
+    g.add_node("llm_semantic_analysis", llm_semantic_analysis_node)
 
     analyzer_node_names: list[str] = []
     for agent in AGENT_NAMES:
@@ -37,7 +44,7 @@ def build_graph() -> StateGraph:
     g.add_node("validator", validator_node)
 
     g.set_entry_point("load_extraction")
-    chain = ["load_extraction", *analyzer_node_names, "aggregate_and_build", "validator"]
+    chain = ["load_extraction", "llm_semantic_analysis", *analyzer_node_names, "aggregate_and_build", "validator"]
     for a, b in zip(chain, chain[1:]):
         g.add_edge(a, b)
     g.add_edge("validator", END)

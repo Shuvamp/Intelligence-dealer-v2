@@ -52,6 +52,7 @@ def json_builder_node(state: WebsiteExtractionState) -> dict:
             "schema_markup_types": _collect_schema_types(state),
         },
         "trust": state.get("trust") or {},
+        "links": state.get("links") or {},
     }
     return {"extraction_data": extraction_data}
 

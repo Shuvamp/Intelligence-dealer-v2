@@ -37,6 +37,8 @@ from .nodes.content_seo import (
     analyze_page_analysis,
 )
 from .nodes.links_media import analyze_external_links, analyze_images, analyze_internal_links, analyze_videos
+from .nodes.llm_semantic import llm_semantic_analysis_node
+from .nodes.pagespeed import fetch_pagespeed_node
 from .nodes.technical import (
     analyze_core_web_vitals,
     analyze_performance,
@@ -82,6 +84,8 @@ def build_graph() -> StateGraph:
     g = StateGraph(SEOAnalysisState)
 
     g.add_node("load_extraction", load_extraction_node)
+    g.add_node("fetch_pagespeed", fetch_pagespeed_node)
+    g.add_node("llm_semantic_analysis", llm_semantic_analysis_node)
 
     analyzer_node_names: list[str] = []
     for dimension in DIMENSION_NAMES:
@@ -93,7 +97,10 @@ def build_graph() -> StateGraph:
     g.add_node("validator", validator_node)
 
     g.set_entry_point("load_extraction")
-    chain = ["load_extraction", *analyzer_node_names, "aggregate_and_build", "validator"]
+    chain = [
+        "load_extraction", "fetch_pagespeed", "llm_semantic_analysis",
+        *analyzer_node_names, "aggregate_and_build", "validator",
+    ]
     for a, b in zip(chain, chain[1:]):
         g.add_edge(a, b)
     g.add_edge("validator", END)
