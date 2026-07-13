@@ -34,6 +34,17 @@ const STATUS_ICON: Record<OptimizedStatus, typeof CheckCircle2> = {
 
 const inr = new Intl.NumberFormat('en-IN')
 
+// Comparison-table rows whose values are formula-based projections, not exact budget math.
+const ILLUSTRATIVE_METRICS = new Set([
+  'Expected Timeline',
+  'Estimated SEO Improvement',
+  'Estimated AEO Improvement',
+  'Expected Lead Growth',
+  'Expected Sales Growth',
+])
+const ILLUSTRATIVE_HINT =
+  'Directional estimate derived from your SEO/AEO analysis scores and the funded budget ratio — a formula-based projection, not a guaranteed outcome.'
+
 export function BudgetPlannerPage() {
   const [selectedId, setSelectedId] = useState<string>('')
   const [budget, setBudget] = useState<string>('100000')
@@ -265,7 +276,16 @@ function BudgetPlan({ result }: { result: BudgetPlanResult }) {
             <tbody>
               {result.comparison_table.map((row) => (
                 <tr key={row.metric} className="border-b border-border/60">
-                  <td className="py-2 pr-3 font-semibold text-foreground">{row.metric}</td>
+                  <td className="py-2 pr-3 font-semibold text-foreground">
+                    {ILLUSTRATIVE_METRICS.has(row.metric) ? (
+                      <span className="inline-flex items-center gap-1.5" title={ILLUSTRATIVE_HINT}>
+                        {row.metric}
+                        <Badge tone="amber" className="cursor-help">Illustrative</Badge>
+                      </span>
+                    ) : (
+                      row.metric
+                    )}
+                  </td>
                   <td className="py-2 pr-3 tabular-nums text-muted-foreground">{row.recommended}</td>
                   <td className="py-2 tabular-nums text-foreground">{row.optimized}</td>
                 </tr>
@@ -273,6 +293,13 @@ function BudgetPlan({ result }: { result: BudgetPlanResult }) {
             </tbody>
           </table>
         </div>
+        <p className="mt-3 flex items-start gap-1.5 text-[11.5px] leading-relaxed text-muted-foreground">
+          <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          <span>
+            Budget and allocation figures are exact. Improvement, lead/sales growth and timeline values are
+            directional estimates based on your analysis scores — not guarantees of actual results.
+          </span>
+        </p>
       </Panel>
 
       {/* Execution plan */}
