@@ -5,12 +5,17 @@ import {
   disconnectLinkedIn,
   syncChannelConnection,
   getLinkedInConnectUrl,
+  getLinkedInOrganizations,
+  selectLinkedInOrganization,
+  refreshLinkedInAnalytics,
 } from '#/lib/marketing'
+import type { LinkedInOrganization } from '#/lib/marketing'
 import type { LinkedInProfile, LinkedInState } from '#/lib/types'
 import {
   ArrowLeft,
   AlertTriangle,
   BadgeCheck,
+  Building2,
   CheckCircle2,
   ExternalLink,
   Loader2,
@@ -21,18 +26,24 @@ import {
 } from 'lucide-react'
 
 export const Route = createFileRoute('/_authed/marketing/linkedin-channel')({
-  loader: async () => getLinkedInProfile(),
+  loader: async () => {
+    const [profile, orgs] = await Promise.all([getLinkedInProfile(), getLinkedInOrganizations()])
+    return { profile, orgs }
+  },
   component: LinkedInChannelPage,
 })
 
 function LinkedInChannelPage() {
   const router = useRouter()
-  const initial = Route.useLoaderData()
+  const { profile: initial, orgs: initialOrgs } = Route.useLoaderData()
 
   const [liState, setLiState] = useState<LinkedInState>(initial.state)
   const [profile, setProfile] = useState<LinkedInProfile | null>(initial.profile)
   const [busy, setBusy] = useState<string | null>(null)
   const [banner, setBanner] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
+  const [orgs] = useState<Array<LinkedInOrganization>>(initialOrgs.organizations)
+  const [orgsStatus] = useState<string>(initialOrgs.status)
+  const [selectedOrgUrn, setSelectedOrgUrn] = useState<string>(orgs[0]?.urn ?? '')
 
   const back = () => router.navigate({ to: '/channels', search: {} as any })
 
@@ -72,6 +83,34 @@ function LinkedInChannelPage() {
       window.location.href = url
     } catch {
       setBanner({ type: 'error', message: 'Failed to start reconnection. Is the API server running on :8000?' })
+      setBusy(null)
+    }
+  }
+
+  const handleSelectOrg = async () => {
+    if (!selectedOrgUrn) return
+    setBusy('select-org')
+    setBanner(null)
+    try {
+      const org = orgs.find((o) => o.urn === selectedOrgUrn)
+      await selectLinkedInOrganization({ data: { orgUrn: selectedOrgUrn, orgName: org?.name } })
+      setBanner({ type: 'success', message: `Connected Company Page: ${org?.name ?? selectedOrgUrn}` })
+    } catch {
+      setBanner({ type: 'error', message: 'Failed to connect the Company Page.' })
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const handleRefreshAnalytics = async () => {
+    setBusy('refresh-analytics')
+    setBanner(null)
+    try {
+      await refreshLinkedInAnalytics()
+      setBanner({ type: 'success', message: 'Analytics refreshed.' })
+    } catch {
+      setBanner({ type: 'error', message: 'Analytics refresh failed.' })
+    } finally {
       setBusy(null)
     }
   }
@@ -198,6 +237,44 @@ function LinkedInChannelPage() {
         </div>
       </div>
 
+      {/* Company Page (Organization) */}
+      {liState === 'connected' && (
+        <div className="rounded-[18px] border border-border bg-white p-6">
+          <div className="mb-3 flex items-center gap-2">
+            <Building2 className="h-4 w-4 text-[#0A66C2]" />
+            <h2 className="text-[14px] font-semibold text-foreground">Company Page</h2>
+          </div>
+          {profile?.linkedin_id && orgs.length > 0 ? (
+            <div className="flex flex-wrap items-center gap-3">
+              <select
+                className="rounded-[10px] border border-border px-3 py-2 text-[13px]"
+                value={selectedOrgUrn}
+                onChange={(e) => setSelectedOrgUrn(e.target.value)}
+              >
+                {orgs.map((o) => (
+                  <option key={o.urn} value={o.urn}>{o.name}</option>
+                ))}
+              </select>
+              <button
+                disabled={busy !== null}
+                className="flex items-center gap-2 rounded-[10px] px-4 py-2 text-[13px] font-semibold text-white transition disabled:opacity-60"
+                style={{ background: '#0A66C2' }}
+                onClick={handleSelectOrg}
+              >
+                {busy === 'select-org' && <Loader2 className="h-4 w-4 animate-spin" />}
+                Use this Page
+              </button>
+            </div>
+          ) : (
+            <p className="text-[12px] text-muted-foreground">
+              {orgsStatus === 'mdp_required'
+                ? 'Connected as a personal profile. Full analytics (reach, impressions, shares, followers growth, profile views) require connecting a LinkedIn Company Page, which needs your LinkedIn Developer App to have Marketing Developer Platform access.'
+                : 'No Company Page found for this account yet — connect a LinkedIn Company Page you administer to unlock full analytics.'}
+            </p>
+          )}
+        </div>
+      )}
+
       {/* Detail rows */}
       <div className="rounded-[18px] border border-border bg-white overflow-hidden">
         {[
@@ -266,6 +343,21 @@ function LinkedInChannelPage() {
               <RefreshCw className="h-4 w-4" />
             )}
             Sync
+          </button>
+        )}
+
+        {liState === 'connected' && (
+          <button
+            disabled={busy !== null}
+            className="flex items-center gap-2 rounded-[10px] border border-border px-5 py-2.5 text-[13px] font-semibold text-foreground hover:bg-muted/40 transition disabled:opacity-50"
+            onClick={handleRefreshAnalytics}
+          >
+            {busy === 'refresh-analytics' ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <RefreshCw className="h-4 w-4" />
+            )}
+            Refresh Analytics
           </button>
         )}
 

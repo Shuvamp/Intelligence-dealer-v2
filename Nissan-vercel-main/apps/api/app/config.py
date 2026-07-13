@@ -32,6 +32,16 @@ FACEBOOK_REDIRECT_URI: str = os.getenv(
     "FACEBOOK_REDIRECT_URI",
     os.getenv("META_REDIRECT_URI", "http://localhost:8000/api/instagram/callback"),
 )
+# Facebook Login for Business — a pre-configured Meta "Configuration" (scopes +
+# settings bundled server-side) referenced by ID instead of a raw scope list.
+# Set up under Meta Developer Console → App → Facebook Login for Business →
+# Configurations. Separate redirect URI from Instagram's since it hits its own
+# callback path (/api/facebook/callback vs /api/instagram/callback) — both
+# must be registered as Valid OAuth Redirect URIs in the Meta app.
+FACEBOOK_CONFIG_ID: str = os.getenv("FACEBOOK_CONFIG_ID", "")
+FACEBOOK_PAGE_REDIRECT_URI: str = os.getenv(
+    "FACEBOOK_PAGE_REDIRECT_URI", "http://localhost:8000/api/facebook/callback"
+)
 FRONTEND_URL: str = os.getenv("FRONTEND_URL", "http://localhost:5173")
 META_API_VERSION: str = os.getenv("META_API_VERSION", "v20.0")
 # Redirect URI for the /auth/instagram/* flow (separate from legacy /api/instagram/*)
@@ -44,4 +54,21 @@ LINKEDIN_CLIENT_ID: str = os.getenv("LINKEDIN_CLIENT_ID", "")
 LINKEDIN_CLIENT_SECRET: str = os.getenv("LINKEDIN_CLIENT_SECRET", "")
 LINKEDIN_REDIRECT_URI: str = os.getenv(
     "LINKEDIN_REDIRECT_URI", "http://localhost:8000/auth/linkedin/callback"
+)
+# LinkedIn REST API version header (format YYYYMM) — bump periodically; LinkedIn
+# supports each versioned release for ~12 months on a rolling basis.
+LINKEDIN_API_VERSION: str = os.getenv("LINKEDIN_API_VERSION", "202606")
+# Org-level analytics (impressions/reach/shares/followers growth/profile views)
+# require the rw_organization_admin scope, which LinkedIn only grants once the
+# Developer App has Marketing Developer Platform (MDP) product access. Requesting
+# an unapproved scope breaks the OAuth consent screen entirely, so this stays off
+# until the app is actually approved — flip to true then reconnect LinkedIn.
+LINKEDIN_ORG_SCOPES_ENABLED: bool = os.getenv("LINKEDIN_ORG_SCOPES_ENABLED", "false").lower() == "true"
+LINKEDIN_ANALYTICS_POLL_SECONDS: int = int(os.getenv("LINKEDIN_ANALYTICS_POLL_SECONDS", "1800"))
+
+# ── YouTube / Google OAuth ─────────────────────────────────────────────────
+GOOGLE_CLIENT_ID: str = os.getenv("GOOGLE_CLIENT_ID", "")
+GOOGLE_CLIENT_SECRET: str = os.getenv("GOOGLE_CLIENT_SECRET", "")
+GOOGLE_REDIRECT_URI: str = os.getenv(
+    "GOOGLE_REDIRECT_URI", "http://localhost:8000/api/youtube/callback"
 )

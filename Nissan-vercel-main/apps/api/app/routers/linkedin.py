@@ -1,13 +1,12 @@
-"""LinkedIn channel API — status, profile, sync, insights, disconnect."""
-import asyncio
+"""LinkedIn channel API — status, profile, sync, insights, organizations, disconnect."""
 import logging
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
-from app.services import channel_store
-from app.services.linkedin import get_post_stats, get_profile_url, verify_token
+from app.services import channel_store, linkedin_analytics_store as analytics_store
+from app.services.linkedin import get_profile_url, list_admin_organizations, verify_token
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -135,19 +134,26 @@ async def linkedin_insights(
     date_to: str | None = Query(None),
 ):
     """
-    Real LinkedIn insights for the connected member account.
+    LinkedIn insights read from stored snapshots (written by the background
+    analytics poller, app/services/linkedin_analytics_poller.py) — not fetched
+    live, so this loads instantly regardless of LinkedIn API latency.
 
-    Available (member API): likes + comments per post (via socialActions),
-    aggregated + ranked into top posts. NOT available for member tokens
-    (returned null): reach, impressions, shares, followers growth, page views —
-    those need an Organization page + Marketing Developer Platform access.
+    Likes/comments/engagement work for any connected account (member API).
+    Reach/impressions/shares/engagement rate/followers growth/profile views
+    only populate once a Company Page (Organization) is connected AND the
+    LinkedIn Developer App has Marketing Developer Platform access — until
+    then their `status` is "mdp_required" (org connected, blocked) or
+    "unavailable" (no org connected yet), which the frontend renders as the
+    required messaging instead of a bare 0.
     """
     empty = {
         "connected": False, "handle": None, "last_sync": None,
+        "analyticsAccess": "member",
         "postsTracked": 0, "postsWithStats": 0,
         "likes": 0, "comments": 0, "engagement": 0, "avgEngagementPerPost": 0,
-        "reach": None, "impressions": None, "shares": None,
+        "reach": None, "impressions": None, "shares": None, "clicks": None,
         "engagementRate": None, "followersGrowth": None, "profileViews": None,
+        "orgMetricsStatus": "unavailable", "accountMetricsStatus": "unavailable",
         "topPosts": [], "posts": [],
     }
 
@@ -155,51 +161,132 @@ async def linkedin_insights(
     if not row or row.get("status") != "connected" or not row.get("access_token"):
         return empty
 
-    token = row["access_token"]
-    posts = channel_store.list_linkedin_posts(tenant_id)
-    # Filter by capture date (ISO strings compare lexically).
+    org_urn = row.get("linkedin_org_urn")
+    posts = await analytics_store.get_posts_for_tenant(tenant_id)
     if date_from:
-        posts = [p for p in posts if (p.get("created_at") or "") >= date_from]
+        posts = [p for p in posts if (p.get("published_at") or "") >= date_from]
     if date_to:
-        posts = [p for p in posts if (p.get("created_at") or "") <= date_to]
-    posts = posts[:25]  # cap live API calls per request
+        posts = [p for p in posts if (p.get("published_at") or "") <= date_to]
 
-    stats = await asyncio.gather(*[get_post_stats(token, p["urn"]) for p in posts]) if posts else []
+    latest_metrics = await analytics_store.get_latest_post_metrics(tenant_id)
+    account_metrics = await analytics_store.get_latest_account_metrics(tenant_id) if org_urn else None
 
     per: list[dict] = []
     likes = comments = 0
-    for p, s in zip(posts, stats):
-        if not s:
+    reach_sum = impressions_sum = shares_sum = clicks_sum = 0
+    engagement_rates: list[float] = []
+    org_status = "unavailable"
+    for p in posts:
+        m = latest_metrics.get(p["urn"])
+        if not m:
             continue
-        likes += s["likes"]
-        comments += s["comments"]
+        likes += m.get("likes") or 0
+        comments += m.get("comments") or 0
+        if m.get("status") == "ok" and m.get("impressions") is not None:
+            reach_sum += m.get("reach") or 0
+            impressions_sum += m.get("impressions") or 0
+            shares_sum += m.get("shares") or 0
+            clicks_sum += m.get("clicks") or 0
+            if m.get("engagement_rate") is not None:
+                engagement_rates.append(m["engagement_rate"])
+        if m.get("status") in ("mdp_required", "ok"):
+            org_status = m["status"]
         per.append({
             "urn": p["urn"],
             "title": p.get("title") or (p.get("caption") or "Untitled post")[:80],
             "caption": p.get("caption"),
-            "likes": s["likes"],
-            "comments": s["comments"],
-            "at": p.get("created_at"),
+            "imageUrl": p.get("image_url"),
+            "at": p.get("published_at"),
+            "likes": m.get("likes"),
+            "comments": m.get("comments"),
+            "shares": m.get("shares"),
+            "impressions": m.get("impressions"),
+            "reach": m.get("reach"),
+            "clicks": m.get("clicks"),
+            "engagementRate": m.get("engagement_rate"),
+            "status": m.get("status"),
         })
 
     engagement = likes + comments
-    top = sorted(per, key=lambda x: x["likes"] + x["comments"], reverse=True)[:5]
+    has_org_data = org_status == "ok"
+    top = sorted(per, key=lambda x: (x["likes"] or 0) + (x["comments"] or 0), reverse=True)[:10]
+
     return {
         "connected": True,
         "handle": row.get("handle"),
         "last_sync": row.get("last_sync"),
+        "analyticsAccess": "organization" if org_urn else "member",
         "postsTracked": len(posts),
         "postsWithStats": len(per),
         "likes": likes,
         "comments": comments,
         "engagement": engagement,
         "avgEngagementPerPost": round(engagement / len(per), 1) if per else 0,
-        # Not available for member tokens (org + MDP only):
-        "reach": None, "impressions": None, "shares": None,
-        "engagementRate": None, "followersGrowth": None, "profileViews": None,
+        "reach": reach_sum if has_org_data else None,
+        "impressions": impressions_sum if has_org_data else None,
+        "shares": shares_sum if has_org_data else None,
+        "clicks": clicks_sum if has_org_data else None,
+        "engagementRate": round(sum(engagement_rates) / len(engagement_rates), 4) if engagement_rates else None,
+        "followersGrowth": (account_metrics or {}).get("followers_growth") if account_metrics and account_metrics.get("status") == "ok" else None,
+        "profileViews": (account_metrics or {}).get("profile_views") if account_metrics and account_metrics.get("status") == "ok" else None,
+        "orgMetricsStatus": org_status if org_urn else "unavailable",
+        "accountMetricsStatus": (account_metrics or {}).get("status", "unavailable") if org_urn else "unavailable",
         "topPosts": top,
         "posts": per,
     }
+
+
+@router.get("/organizations")
+async def linkedin_organizations(tenant_id: str = Query(...)):
+    """List Company Pages (Organizations) the connected member administers.
+    Only meaningful once LINKEDIN_ORG_SCOPES_ENABLED is on and the member
+    reconnected with the rw_organization_admin scope — otherwise LinkedIn
+    returns 403 and this surfaces "mdp_required"."""
+    row = channel_store.get(tenant_id, "linkedin")
+    if not row or row.get("status") != "connected" or not row.get("access_token"):
+        raise HTTPException(status_code=404, detail="No LinkedIn connection found")
+    result = await list_admin_organizations(row["access_token"])
+    if isinstance(result, str):
+        return {"status": result, "organizations": []}
+    return {"status": "ok", "organizations": result}
+
+
+class SelectOrganizationRequest(BaseModel):
+    tenant_id: str
+    org_urn: str
+    org_name: str | None = None
+
+
+@router.post("/organizations/select")
+async def linkedin_select_organization(req: SelectOrganizationRequest):
+    row = channel_store.get(req.tenant_id, "linkedin")
+    if not row:
+        raise HTTPException(status_code=404, detail="No LinkedIn connection found")
+    channel_store.update(
+        req.tenant_id, "linkedin",
+        linkedin_org_urn=req.org_urn, linkedin_org_name=req.org_name,
+    )
+    return {"status": "success", "org_urn": req.org_urn, "org_name": req.org_name}
+
+
+class RefreshAnalyticsRequest(BaseModel):
+    tenant_id: str
+
+
+@router.post("/analytics/refresh")
+async def linkedin_refresh_analytics(req: RefreshAnalyticsRequest):
+    """Manually run one analytics poll for a single tenant (the dashboard's
+    "Refresh analytics" button) instead of waiting for the next scheduled tick."""
+    row = channel_store.get(req.tenant_id, "linkedin")
+    if not row or row.get("status") != "connected" or not row.get("access_token"):
+        raise HTTPException(status_code=400, detail="LinkedIn is not connected")
+    from app.services.linkedin_analytics_poller import refresh_tenant
+    try:
+        await refresh_tenant(req.tenant_id, row)
+    except Exception:  # noqa: BLE001
+        logger.exception("[linkedin:analytics] manual refresh failed tenant=%s", req.tenant_id)
+        raise HTTPException(status_code=502, detail="LinkedIn analytics refresh failed")
+    return {"status": "success"}
 
 
 @router.post("/disconnect")

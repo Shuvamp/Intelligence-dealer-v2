@@ -195,6 +195,8 @@ def _bootstrap(conn: duckdb.DuckDBPyConnection) -> None:
         ("publish_status", "VARCHAR DEFAULT 'draft'"),
         ("published_at", "VARCHAR"),
         ("poster_url", "VARCHAR"),
+        ("video_url", "VARCHAR"),
+        ("channel_status", "VARCHAR"),
     ]:
         try:
             conn.execute(f"ALTER TABLE campaign_days ADD COLUMN IF NOT EXISTS {col} {typ}")
@@ -251,6 +253,8 @@ def _bootstrap(conn: duckdb.DuckDBPyConnection) -> None:
         ("publish_status", "VARCHAR DEFAULT 'draft'"),
         ("published_at", "VARCHAR"),
         ("poster_url", "VARCHAR"),
+        ("video_url", "VARCHAR"),
+        ("channel_status", "VARCHAR"),
     ]:
         try:
             conn.execute(f"ALTER TABLE opportunities ADD COLUMN IF NOT EXISTS {col} {typ}")
@@ -377,7 +381,7 @@ def update_day_content(
     campaign_id: str, tenant_id: str, day_date: str, fields: dict[str, Any]
 ) -> None:
     """Partial update of a day's generated content columns."""
-    allowed = ("headline", "subheadline", "caption", "hashtags", "cta", "offer", "content_status", "poster_url")
+    allowed = ("headline", "subheadline", "caption", "hashtags", "cta", "offer", "content_status", "poster_url", "video_url")
     sets, params = [], []
     for k in allowed:
         if k in fields:
@@ -398,7 +402,7 @@ def list_all_campaign_days(tenant_id: str) -> list[dict[str, Any]]:
         """SELECT campaign_id, tenant_id,
                   CAST(day_date AS VARCHAR) AS day_date,
                   day_num, theme, vehicle,
-                  headline, subheadline, caption, hashtags, cta, offer, poster_url,
+                  headline, subheadline, caption, hashtags, cta, offer, poster_url, video_url,
                   COALESCE(content_status, 'pending') AS content_status
            FROM campaign_days
            WHERE tenant_id = ?
@@ -440,7 +444,7 @@ def upsert_opportunities(rows: list[dict[str, Any]]) -> None:
 
 def update_opportunity_content(opp_id: str, tenant_id: str, fields: dict[str, Any]) -> None:
     """Partial update of an opportunity's generated content columns."""
-    allowed = ("headline", "subheadline", "caption", "hashtags", "cta", "offer", "content_status", "poster_url")
+    allowed = ("headline", "subheadline", "caption", "hashtags", "cta", "offer", "content_status", "poster_url", "video_url")
     sets, params = [], []
     for k in allowed:
         if k in fields:
@@ -460,7 +464,7 @@ def list_opportunities(tenant_id: str, month: int, year: int) -> list[dict[str, 
         """SELECT id, tenant_id, month, year,
                   CAST(date AS VARCHAR) AS date,
                   name, kind, theme, suggestion,
-                  headline, subheadline, caption, hashtags, cta, offer, poster_url,
+                  headline, subheadline, caption, hashtags, cta, offer, poster_url, video_url,
                   COALESCE(content_status, 'pending') AS content_status
            FROM opportunities
            WHERE tenant_id = ? AND month = ? AND year = ? ORDER BY date""",
@@ -560,7 +564,7 @@ def list_due_posts(now_iso_str: str) -> list[dict[str, Any]]:
         """SELECT d.tenant_id, d.campaign_id AS group_id,
                   CAST(d.day_date AS VARCHAR) AS day_date, d.day_num,
                   d.headline, d.subheadline, d.caption, d.hashtags, d.cta, d.theme,
-                  d.poster_url, d.scheduled_at, c.name AS title, c.channels AS channels
+                  d.poster_url, d.video_url, d.scheduled_at, c.name AS title, c.channels AS channels
            FROM campaign_days d
            LEFT JOIN campaigns c ON c.campaign_id = d.campaign_id AND c.tenant_id = d.tenant_id
            WHERE d.publish_status = 'queued'
@@ -573,7 +577,7 @@ def list_due_posts(now_iso_str: str) -> list[dict[str, Any]]:
     opps = _exec(
         """SELECT tenant_id, id AS group_id, CAST(date AS VARCHAR) AS day_date,
                   headline, subheadline, caption, hashtags, cta, theme,
-                  poster_url, scheduled_at, name AS title
+                  poster_url, video_url, scheduled_at, name AS title
            FROM opportunities
            WHERE publish_status = 'queued'
                  AND scheduled_at IS NOT NULL AND scheduled_at <= ?
@@ -593,31 +597,38 @@ def set_publish_status(
     status: str,
     day_date: str | None = None,
     published_at: str | None = None,
+    channel_status: str | None = None,
 ) -> None:
-    """Transition a single post's publish_status (queued → publishing → published).
-    `published_at` is only written when non-NULL (kept across transient states)."""
+    """Transition a single post's publish_status (queued → publishing → published/failed).
+    `published_at` is only written when non-NULL (kept across transient states).
+    `channel_status` (JSON-encoded per-platform outcome) is likewise only written
+    when non-NULL, so the Publishing queue can show why a scheduled post
+    succeeded/failed/skipped per channel."""
     conn = get_conn()
     if kind == "campaign":
         if day_date is not None:
             conn.execute(
                 """UPDATE campaign_days
-                   SET publish_status = ?, published_at = COALESCE(?, published_at)
+                   SET publish_status = ?, published_at = COALESCE(?, published_at),
+                       channel_status = COALESCE(?, channel_status)
                    WHERE campaign_id = ? AND tenant_id = ? AND day_date = ?""",
-                [status, published_at, group_id, tenant_id, day_date],
+                [status, published_at, channel_status, group_id, tenant_id, day_date],
             )
         else:
             conn.execute(
                 """UPDATE campaign_days
-                   SET publish_status = ?, published_at = COALESCE(?, published_at)
+                   SET publish_status = ?, published_at = COALESCE(?, published_at),
+                       channel_status = COALESCE(?, channel_status)
                    WHERE campaign_id = ? AND tenant_id = ?""",
-                [status, published_at, group_id, tenant_id],
+                [status, published_at, channel_status, group_id, tenant_id],
             )
     else:
         conn.execute(
             """UPDATE opportunities
-               SET publish_status = ?, published_at = COALESCE(?, published_at)
+               SET publish_status = ?, published_at = COALESCE(?, published_at),
+                   channel_status = COALESCE(?, channel_status)
                WHERE id = ? AND tenant_id = ?""",
-            [status, published_at, group_id, tenant_id],
+            [status, published_at, channel_status, group_id, tenant_id],
         )
 
 
@@ -626,8 +637,8 @@ def list_publishing(tenant_id: str) -> list[dict[str, Any]]:
     days = _exec(
         """SELECT d.campaign_id AS group_id, c.name AS title, d.day_num,
                   CAST(d.day_date AS VARCHAR) AS date, d.theme, d.vehicle,
-                  d.headline, d.subheadline, d.caption, d.hashtags, d.cta, d.poster_url,
-                  d.scheduled_at, COALESCE(d.publish_status,'draft') AS publish_status, d.published_at
+                  d.headline, d.subheadline, d.caption, d.hashtags, d.cta, d.poster_url, d.video_url,
+                  d.scheduled_at, COALESCE(d.publish_status,'draft') AS publish_status, d.published_at, d.channel_status
            FROM campaign_days d
            LEFT JOIN campaigns c ON c.campaign_id = d.campaign_id AND c.tenant_id = d.tenant_id
            WHERE d.tenant_id = ? AND COALESCE(d.publish_status,'draft') <> 'draft'
@@ -638,8 +649,8 @@ def list_publishing(tenant_id: str) -> list[dict[str, Any]]:
         d["kind"] = "campaign"
     opps = _exec(
         """SELECT id AS group_id, name AS title, CAST(date AS VARCHAR) AS date,
-                  theme, headline, subheadline, caption, hashtags, cta, poster_url,
-                  scheduled_at, COALESCE(publish_status,'draft') AS publish_status, published_at, kind AS event_kind
+                  theme, headline, subheadline, caption, hashtags, cta, poster_url, video_url,
+                  scheduled_at, COALESCE(publish_status,'draft') AS publish_status, published_at, channel_status, kind AS event_kind
            FROM opportunities
            WHERE tenant_id = ? AND COALESCE(publish_status,'draft') <> 'draft'
            ORDER BY scheduled_at""",

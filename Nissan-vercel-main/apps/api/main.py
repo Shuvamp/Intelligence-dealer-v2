@@ -42,7 +42,7 @@ from agents.call_intelligence.service import (
 from agents.call_intelligence.data import CallData
 from agents.events import bus, DomainEvent, EventType  # Phase 7 — event bus
 
-from app.routers import marketing, instagram, auth, linkedin, channels, publish, context_planner, website_extraction, company_summary, seo_agent, aeo_agent, recommendation_engine, report_generator, marketing_strategy, marketing_budget_planner
+from app.routers import marketing, instagram, auth, linkedin, youtube, facebook, channels, publish, context_planner, website_extraction, company_summary, seo_agent, aeo_agent, recommendation_engine, report_generator, marketing_strategy, marketing_budget_planner
 from app.routers import db as db_router
 
 # GROQ_API_KEY (and the rest of apps/api/.env) is read ONCE here at startup.
@@ -54,6 +54,8 @@ logger = logging.getLogger(__name__)
 
 POSTERS_DIR = Path(__file__).resolve().parent / "generated" / "posters"
 POSTERS_DIR.mkdir(parents=True, exist_ok=True)
+VIDEOS_DIR = Path(__file__).resolve().parent / "generated" / "videos"
+VIDEOS_DIR.mkdir(parents=True, exist_ok=True)
 
 app = FastAPI(title="ADIP API", version="0.1.0")
 
@@ -73,6 +75,8 @@ app.include_router(marketing.router, prefix="/marketing", tags=["marketing"])
 app.include_router(db_router.router)
 app.include_router(instagram.router, prefix="/api/instagram", tags=["instagram"])
 app.include_router(linkedin.router, prefix="/api/linkedin", tags=["linkedin"])
+app.include_router(youtube.router, prefix="/api/youtube", tags=["youtube"])
+app.include_router(facebook.router, prefix="/api/facebook", tags=["facebook"])
 app.include_router(channels.router, prefix="/api/channels", tags=["channels"])
 app.include_router(publish.router, prefix="/api/publish", tags=["publish"])
 app.include_router(auth.router, prefix="/auth", tags=["auth"])
@@ -87,6 +91,7 @@ app.include_router(marketing_strategy.router, prefix="/marketing-strategy", tags
 app.include_router(marketing_budget_planner.router, prefix="/marketing-budget-planner", tags=["marketing-budget-planner"])
 
 app.mount("/posters", StaticFiles(directory=str(POSTERS_DIR)), name="posters")
+app.mount("/videos", StaticFiles(directory=str(VIDEOS_DIR)), name="videos")
 
 # ---------------------------------------------------------------------------
 # Supabase / tenant constants
@@ -324,6 +329,32 @@ async def _stop_auto_publisher() -> None:
             pass
     from app.db import duckdb as _duckdb
     _duckdb.close_all()
+
+
+_linkedin_analytics_task: asyncio.Task | None = None
+_linkedin_analytics_stop: asyncio.Event | None = None
+
+
+@app.on_event("startup")
+async def _start_linkedin_analytics_poller() -> None:
+    global _linkedin_analytics_task, _linkedin_analytics_stop
+    from app.services.linkedin_analytics_poller import run_loop
+    _linkedin_analytics_stop = asyncio.Event()
+    _linkedin_analytics_task = asyncio.create_task(
+        run_loop(_linkedin_analytics_stop), name="linkedin-analytics-poller"
+    )
+
+
+@app.on_event("shutdown")
+async def _stop_linkedin_analytics_poller() -> None:
+    if _linkedin_analytics_stop:
+        _linkedin_analytics_stop.set()
+    if _linkedin_analytics_task:
+        _linkedin_analytics_task.cancel()
+        try:
+            await _linkedin_analytics_task
+        except (asyncio.CancelledError, Exception):  # noqa: BLE001
+            pass
 
 
 @app.on_event("startup")

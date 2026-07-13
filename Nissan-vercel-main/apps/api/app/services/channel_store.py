@@ -9,10 +9,16 @@ Why local SQLite instead of Supabase?
 
   Mirrors the DuckDB campaign store pattern (apps/web/src/lib/analytics.duckdb.ts).
 
-Table shape matches supabase/migrations/0015 + 0016:
+Table shape matches supabase/migrations/0015 + 0016 + 0036 + 0037:
   tenant_id, channel, handle, instagram_id, linkedin_id, page_id, page_name,
-  access_token, token_type, status, last_sync, created_at, updated_at
+  access_token, token_type, status, last_sync, created_at, updated_at,
+  linkedin_org_urn, linkedin_org_name, youtube_channel_id, youtube_channel_name,
+  refresh_token, token_expires_at
 Unique key: (tenant_id, channel)
+
+Published LinkedIn post URNs and their metrics are NOT stored here — see
+app/services/linkedin_analytics_store.py, which persists to Supabase/the DuckDB
+shim (needed so the background analytics poller can scan across tenants).
 """
 import os
 import sqlite3
@@ -25,6 +31,8 @@ _COLUMNS = [
     "tenant_id", "channel", "handle", "instagram_id", "linkedin_id",
     "page_id", "page_name", "email", "picture", "profile_url", "access_token",
     "token_type", "status", "last_sync", "created_at", "updated_at",
+    "linkedin_org_urn", "linkedin_org_name",
+    "youtube_channel_id", "youtube_channel_name", "refresh_token", "token_expires_at",
 ]
 
 
@@ -63,50 +71,15 @@ def _init(conn: sqlite3.Connection) -> None:
         """
     )
     # Idempotent column adds for pre-existing DB files (swallow "duplicate column")
-    for col in ("email", "picture", "profile_url"):
+    for col in (
+        "email", "picture", "profile_url", "linkedin_org_urn", "linkedin_org_name",
+        "youtube_channel_id", "youtube_channel_name", "refresh_token", "token_expires_at",
+    ):
         try:
             conn.execute(f"ALTER TABLE social_channel_connections ADD COLUMN {col} TEXT")
         except sqlite3.OperationalError:
             pass
-    # Published LinkedIn post URNs — needed to fetch per-post likes/comments
-    # (socialActions) later. Captured at publish time; analytics is read-only.
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS linkedin_posts (
-            tenant_id  TEXT NOT NULL,
-            urn        TEXT NOT NULL,
-            caption    TEXT,
-            title      TEXT,
-            created_at TEXT NOT NULL,
-            PRIMARY KEY (tenant_id, urn)
-        )
-        """
-    )
     conn.commit()
-
-
-def add_linkedin_post(tenant_id: str, urn: str, caption: str = "", title: str = "") -> None:
-    """Record a published LinkedIn post URN for later insight lookups."""
-    with _conn() as conn:
-        _init(conn)
-        conn.execute(
-            "INSERT OR REPLACE INTO linkedin_posts (tenant_id, urn, caption, title, created_at) "
-            "VALUES (?,?,?,?,?)",
-            (tenant_id, urn, caption[:500], title[:200], _now()),
-        )
-        conn.commit()
-
-
-def list_linkedin_posts(tenant_id: str) -> list[dict]:
-    """All recorded LinkedIn post URNs for a tenant, newest first."""
-    with _conn() as conn:
-        _init(conn)
-        rows = conn.execute(
-            "SELECT urn, caption, title, created_at FROM linkedin_posts "
-            "WHERE tenant_id=? ORDER BY created_at DESC",
-            (tenant_id,),
-        ).fetchall()
-        return [dict(r) for r in rows]
 
 
 def upsert(tenant_id: str, channel: str, **fields) -> None:
@@ -158,6 +131,19 @@ def list_for_tenant(tenant_id: str) -> list[dict]:
         rows = conn.execute(
             "SELECT * FROM social_channel_connections WHERE tenant_id=?",
             (tenant_id,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def list_connected(channel: str) -> list[dict]:
+    """All tenants with a currently-connected row for one channel — used by
+    background jobs (e.g. the LinkedIn analytics poller) that scan across
+    tenants rather than operating within a single request's tenant scope."""
+    with _conn() as conn:
+        _init(conn)
+        rows = conn.execute(
+            "SELECT * FROM social_channel_connections WHERE channel=? AND status='connected' AND access_token != ''",
+            (channel,),
         ).fetchall()
         return [dict(r) for r in rows]
 

@@ -310,6 +310,36 @@ async function initSchema() {
     spend DOUBLE DEFAULT 0, cost_per_lead DOUBLE DEFAULT 0,
     conversion_rate DOUBLE DEFAULT 0, captured_at VARCHAR
   )`)
+  // LinkedIn analytics — published post URNs + periodic metric snapshots
+  // (mirrors supabase/migrations/0036_linkedin_analytics.sql).
+  await run(`CREATE TABLE linkedin_posts (
+    id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid()::VARCHAR,
+    tenant_id VARCHAR NOT NULL, urn VARCHAR NOT NULL, org_urn VARCHAR,
+    caption VARCHAR, title VARCHAR, image_asset_urn VARCHAR,
+    image_url VARCHAR, image_url_expires_at VARCHAR,
+    published_at VARCHAR, created_at VARCHAR
+  )`)
+  await run(`CREATE TABLE linkedin_post_metrics (
+    id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid()::VARCHAR,
+    tenant_id VARCHAR NOT NULL, post_urn VARCHAR NOT NULL,
+    likes INTEGER, comments INTEGER, shares INTEGER,
+    impressions INTEGER, reach INTEGER, clicks INTEGER, engagement_rate DOUBLE,
+    status VARCHAR NOT NULL, error_message VARCHAR, captured_at VARCHAR
+  )`)
+  await run(`CREATE TABLE linkedin_account_metrics (
+    id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid()::VARCHAR,
+    tenant_id VARCHAR NOT NULL, org_urn VARCHAR,
+    followers_growth INTEGER, profile_views INTEGER,
+    status VARCHAR NOT NULL, error_message VARCHAR, captured_at VARCHAR
+  )`)
+  // YouTube channel integration — published video records
+  // (mirrors supabase/migrations/0037_youtube_channel.sql).
+  await run(`CREATE TABLE youtube_videos (
+    id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid()::VARCHAR,
+    tenant_id VARCHAR NOT NULL, video_id VARCHAR NOT NULL, video_url VARCHAR NOT NULL,
+    title VARCHAR, description VARCHAR, privacy_status VARCHAR,
+    published_at VARCHAR, created_at VARCHAR
+  )`)
   await run(`CREATE TABLE market_signals (
     id VARCHAR PRIMARY KEY, tenant_id VARCHAR, kind VARCHAR, title VARCHAR,
     detail VARCHAR, metric_label VARCHAR, metric_value VARCHAR,

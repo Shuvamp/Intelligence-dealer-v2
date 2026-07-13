@@ -18,9 +18,12 @@ from typing import Optional
 import httpx
 
 from app.db import duckdb as db
-from app.services import channel_store
+from app.services import channel_store, linkedin_analytics_store
 from app.services.linkedin import LinkedInPublishError
 from app.services.linkedin import publish_post as _linkedin_publish
+from app.services.facebook import FacebookPublishError
+from app.services.facebook import publish_post as _facebook_publish
+from app.services.youtube import publish_video_from_url as _youtube_publish
 
 logger = logging.getLogger("app.tools.publishing")
 
@@ -149,7 +152,7 @@ async def publish_linkedin_tool(post: dict, poster: Optional[dict]) -> dict:
     """
     Publish to LinkedIn using the real linkedin service (unchanged).
 
-    Records the post URN in channel_store for analytics (best-effort).
+    Records the post URN via linkedin_analytics_store for analytics (best-effort).
     Returns {"status": "success", "post_id": "urn:li:share:..."} on success,
     {"status": "error", "error": "..."} on failure,
     {"status": "skipped", "reason": "not_connected"} when disconnected.
@@ -179,9 +182,10 @@ async def publish_linkedin_tool(post: dict, poster: Optional[dict]) -> dict:
         urn = result.get("post_id")
         if urn:
             try:
-                await asyncio.to_thread(
-                    channel_store.add_linkedin_post,
+                await linkedin_analytics_store.insert_post(
                     tenant_id, urn, caption, post.get("headline") or "",
+                    org_urn=row.get("linkedin_org_urn"),
+                    image_asset_urn=result.get("asset_urn"),
                 )
             except Exception:
                 logger.warning("[tool:publish_linkedin] URN record failed urn=%s", urn)
@@ -195,6 +199,40 @@ async def publish_linkedin_tool(post: dict, poster: Optional[dict]) -> dict:
     except Exception:
         logger.exception("[tool:publish_linkedin] unexpected group=%s", post.get("group_id"))
         return {"status": "error", "error": "Unexpected LinkedIn error"}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Tool 4b — publish_youtube
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def publish_youtube_tool(post: dict) -> dict:
+    """
+    Publish to YouTube using the real youtube service (videos.insert).
+
+    Unlike LinkedIn/IG/FB, YouTube needs an actual video file — post['video_url']
+    (set via Content Studio's video attachment) — not the poster image, so this
+    tool takes only `post`, no `poster` param.
+    Returns {"status": "success", "video_id": "...", "video_url": "..."},
+    {"status": "skipped", "reason": "not_connected" | "video_required"}, or
+    {"status": "error", "error": "..."}.
+    """
+    tenant_id = post.get("tenant_id", "")
+    row = await asyncio.to_thread(channel_store.get, tenant_id, "youtube")
+    if not (row and row.get("status") == "connected" and row.get("access_token")):
+        logger.info("[tool:publish_youtube] not_connected tenant=%s", tenant_id)
+        return {"status": "skipped", "reason": "not_connected"}
+
+    result = await _youtube_publish(
+        tenant_id, row,
+        title=post.get("headline") or post.get("theme") or "",
+        description=post.get("subheadline") or "",
+        video_url=post.get("video_url"),
+        privacy_status="private",
+    )
+    logger.info(
+        "[tool:publish_youtube] group=%s -> %s", post.get("group_id"), result.get("status"),
+    )
+    return result
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -213,18 +251,55 @@ async def publish_instagram_tool(post: dict, poster: Optional[dict]) -> dict:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Tool 6 — publish_facebook  (placeholder — preserves existing behaviour)
+# Tool 6 — publish_facebook
 # ─────────────────────────────────────────────────────────────────────────────
 
 async def publish_facebook_tool(post: dict, poster: Optional[dict]) -> dict:
     """
-    Facebook publishing — not implemented yet.
-    Returns the same skipped payload as the existing publish router.
+    Publish to Facebook using the real facebook service (Page /feed or /photos).
+
+    Records nothing extra beyond the returned result — unlike LinkedIn there's
+    no analytics store wired up yet for Facebook Page posts.
+    Returns {"status": "success", "post_id": "..."} on success,
+    {"status": "error", "error": "..."} on failure,
+    {"status": "skipped", "reason": "not_connected"} when disconnected.
     """
-    logger.info(
-        "[tool:publish_facebook] not_implemented group=%s", post.get("group_id"),
+    tenant_id = post.get("tenant_id", "")
+    row = await asyncio.to_thread(channel_store.get, tenant_id, "facebook")
+    if not (row and row.get("status") == "connected" and row.get("access_token")):
+        logger.info("[tool:publish_facebook] not_connected tenant=%s", tenant_id)
+        return {"status": "skipped", "reason": "not_connected"}
+
+    page_id = row.get("page_id")
+    if not page_id:
+        logger.error("[tool:publish_facebook] tenant=%s connected but missing page_id", tenant_id)
+        return {"status": "error", "error": "Facebook connection missing page_id — reconnect"}
+
+    caption = "\n\n".join(
+        part
+        for part in [post.get("caption"), " ".join(post.get("hashtags") or [])]
+        if part
     )
-    return {"status": "skipped", "reason": "publishing_not_implemented"}
+    image_bytes = await _resolve_image_bytes(poster)
+
+    logger.info(
+        "[tool:publish_facebook] group=%s page_id=%s page_name=%s caption_len=%d has_image=%s",
+        post.get("group_id"), page_id, row.get("page_name"), len(caption), bool(image_bytes),
+    )
+
+    try:
+        result = await _facebook_publish(page_id, row["access_token"], caption, image_bytes)
+        logger.info(
+            "[tool:publish_facebook] success group=%s page_id=%s post_id=%s",
+            post.get("group_id"), page_id, result.get("post_id"),
+        )
+        return result
+    except FacebookPublishError as exc:
+        logger.error("[tool:publish_facebook] group=%s page_id=%s err=%s", post.get("group_id"), page_id, exc)
+        return {"status": "error", "error": str(exc)}
+    except Exception:
+        logger.exception("[tool:publish_facebook] unexpected group=%s page_id=%s", post.get("group_id"), page_id)
+        return {"status": "error", "error": "Unexpected Facebook error"}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -238,16 +313,18 @@ async def update_status_tool(
     status: str,
     day_date: Optional[str] = None,
     published_at: Optional[str] = None,
+    channel_status: Optional[str] = None,
 ) -> None:
     """
-    Flip publish_status in DuckDB.
-
-    Always called regardless of per-channel outcome — preserves the existing
-    semantics where channel failures never block the status transition.
+    Flip publish_status (and, when given, the per-channel channel_status JSON)
+    in DuckDB. `status` should be 'failed' rather than 'published' when the
+    caller already knows no channel actually succeeded — see
+    app/agents/publishing_agent.py's _update_status, which decides this from
+    the accumulated post_results before calling here.
     """
     await asyncio.to_thread(
         db.set_publish_status,
-        kind, group_id, tenant_id, status, day_date, published_at,
+        kind, group_id, tenant_id, status, day_date, published_at, channel_status,
     )
     logger.info("[tool:update_status] %s:%s → %s", kind, group_id, status)
 

@@ -347,8 +347,10 @@ export type OpportunityKind = 'festival' | 'holiday' | 'regional' | 'dealership'
 // Lifecycle of AI-generated post content for a day or event.
 export type ContentStatus = 'pending' | 'generated' | 'edited' | 'approved'
 
-// Publishing pipeline state for an approved item.
-export type PublishStatus = 'draft' | 'queued' | 'published' | 'rejected'
+// Publishing pipeline state for an approved item. 'failed' = every targeted
+// channel errored or was skipped on the scheduled/manual attempt (e.g.
+// YouTube selected with no video attached) — see channel_status for why.
+export type PublishStatus = 'draft' | 'queued' | 'published' | 'failed' | 'rejected'
 
 // Post-ready copy attached to a campaign day or a calendar event.
 export interface GeneratedContent {
@@ -363,6 +365,8 @@ export interface GeneratedContent {
   publish_status?: PublishStatus
   published_at?: string | null
   poster_url?: string | null     // generated AI poster (served from /posters/…)
+  video_url?: string | null      // attached video (served from /videos/…) — required for YouTube
+  channel_status?: string | null // JSON-encoded per-platform outcome from the last publish attempt
 }
 
 // A row in the Publishing queue/log — a campaign day or a calendar event.
@@ -378,9 +382,12 @@ export interface PublishingItem {
   caption?: string | null
   hashtags?: Array<string> | null
   cta?: string | null
+  poster_url?: string | null
+  video_url?: string | null
   scheduled_at?: string | null
   publish_status: PublishStatus
   published_at?: string | null
+  channel_status?: string | null
 }
 
 export interface MonthOpportunity extends GeneratedContent {
@@ -569,10 +576,22 @@ export interface LinkedInProfileResult {
   profile: LinkedInProfile | null
 }
 
+export type YouTubeState = 'not_connected' | 'connected' | 'reconnect_required' | 'error'
+
+export interface YouTubeStatus {
+  connected: boolean
+  handle: string | null
+  last_sync: string | null
+  channel_id: string | null
+  channel_name: string | null
+}
+
 // Per-platform outcome from POST /api/publish. status: success | skipped | error.
 export interface PublishPlatformResult {
   status: 'success' | 'skipped' | 'error'
   post_id?: string
+  video_id?: string   // youtube success
+  video_url?: string  // youtube success — https://www.youtube.com/watch?v=...
   reason?: string
   error?: string
 }

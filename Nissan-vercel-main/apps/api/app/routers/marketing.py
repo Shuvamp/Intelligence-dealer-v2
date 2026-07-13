@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, UploadFile, File, Form
 from pydantic import BaseModel
 from typing import Optional
 from pathlib import Path
@@ -15,6 +15,10 @@ logger = logging.getLogger(__name__)
 
 # Generated posters are stored in the backend (served by main.py at /posters).
 POSTERS_DIR = Path(__file__).resolve().parent.parent.parent / "generated" / "posters"
+# User-attached videos (Content Studio → YouTube) — served by main.py at /videos.
+VIDEOS_DIR = Path(__file__).resolve().parent.parent.parent / "generated" / "videos"
+_ALLOWED_VIDEO_EXT = {".mp4", ".mov", ".webm", ".avi", ".mkv"}
+_MAX_VIDEO_BYTES = 500 * 1024 * 1024  # 500MB — generous for a dealer-made promo clip
 from app.gemini import gemini_image, has_gemini_key
 from app.llm import llm_json, has_llm
 from app.agents.content_generation import content_agent, generate_batch, suggest_field
@@ -487,6 +491,39 @@ def poster_regenerate(req: BannerRequest):
     """Force-regenerate a poster, ignoring any cached file on disk."""
     req.force_regenerate = True
     return poster_banner(req)
+
+
+# ── Content Studio video attachment (YouTube publish needs a real video file,
+# unlike the image/text channels — see app/routers/publish.py's youtube branch
+# and app/services/youtube.py's upload_video) ────────────────────────────────
+
+class VideoUploadResponse(BaseModel):
+    video_url: str   # served path, e.g. /videos/<tenant_id>/<uuid>.mp4
+
+
+@router.post("/video/upload", response_model=VideoUploadResponse)
+async def video_upload(tenant_id: str = Form(...), video: UploadFile = File(...)):
+    """Save a Content Studio video attachment to disk and return its served
+    path. Mirrors _save_poster's role for images — the returned path is what
+    gets persisted as campaign_days.video_url / opportunities.video_url."""
+    ext = Path(video.filename or "").suffix.lower()
+    if ext not in _ALLOWED_VIDEO_EXT:
+        raise HTTPException(status_code=400, detail=f"Unsupported video format '{ext}'. Allowed: {sorted(_ALLOWED_VIDEO_EXT)}")
+
+    contents = await video.read()
+    if not contents:
+        raise HTTPException(status_code=400, detail="Empty file")
+    if len(contents) > _MAX_VIDEO_BYTES:
+        raise HTTPException(status_code=413, detail=f"File exceeds {_MAX_VIDEO_BYTES // (1024 * 1024)} MB limit")
+
+    dest_dir = VIDEOS_DIR / _safe(tenant_id)
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    fname = f"{uuid.uuid4().hex}{ext}"
+    (dest_dir / fname).write_bytes(contents)
+
+    video_url = f"/videos/{_safe(tenant_id)}/{fname}"
+    logger.info("[video:upload] tenant=%s saved → %s (%d bytes)", tenant_id, video_url, len(contents))
+    return VideoUploadResponse(video_url=video_url)
 
 
 # ── Marketing Copilot (Agent 8) ───────────────────────────────────────────────

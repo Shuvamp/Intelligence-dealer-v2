@@ -6,6 +6,9 @@ import {
   disconnectInstagram,
   disconnectLinkedIn,
   syncChannelConnection,
+  getYouTubeStatus,
+  disconnectYouTube,
+  disconnectFacebook,
 } from '#/lib/marketing'
 import type { ChannelConnection, LinkedInState } from '#/lib/types'
 import {
@@ -57,6 +60,15 @@ const ERROR_MESSAGES: Record<string, string> = {
   linkedin_invalid_code:    'LinkedIn authorization code expired or already used. Please start the connection again.',
   linkedin_api_error:       'LinkedIn API returned an error. Check the API server logs.',
   linkedin_callback_failed: 'An unexpected error occurred during LinkedIn connection. Check the API server logs.',
+  youtube_access_denied:    'You cancelled the YouTube authorization. Click Connect to try again.',
+  youtube_no_channel:       'No YouTube channel found on this Google account.',
+  youtube_callback_failed:  'An unexpected error occurred during YouTube connection. Check the API server logs.',
+  facebook_access_denied:          'You cancelled the Facebook authorization. Click Connect to try again.',
+  facebook_no_pages:               'No Facebook Pages found on your account. Create a Facebook Page and try again.',
+  facebook_redirect_uri_mismatch:  'OAuth redirect URI mismatch — check FACEBOOK_PAGE_REDIRECT_URI in apps/api/.env matches your Meta app settings.',
+  facebook_invalid_code:           'Authorization code expired or already used. Please start the connection again.',
+  facebook_meta_api_error:         'Meta API returned an error. Check the API server logs.',
+  facebook_callback_failed:        'An unexpected error occurred during Facebook connection. Check the API server logs.',
 }
 
 type ConnectState = 'idle' | 'connecting' | 'success' | 'error'
@@ -86,6 +98,14 @@ function ConnectedChannels() {
     try { return JSON.parse(localStorage.getItem('linkedin_connection') ?? 'null') } catch { return null }
   })
 
+  const [ytLocal, setYtLocal] = useState<{ handle?: string; youtube_channel_id?: string } | null>(() => {
+    try { return JSON.parse(localStorage.getItem('youtube_connection') ?? 'null') } catch { return null }
+  })
+
+  const [fbLocal, setFbLocal] = useState<{ handle?: string; page_id?: string; page_name?: string } | null>(() => {
+    try { return JSON.parse(localStorage.getItem('facebook_connection') ?? 'null') } catch { return null }
+  })
+
   // Badge state + profile URL (profile details live in the dedicated page)
   const [linkedinState, setLinkedinState] = useState<LinkedInState | null>(null)
   const [linkedinProfileUrl, setLinkedinProfileUrl] = useState<string | null>(null)
@@ -109,6 +129,37 @@ function ConnectedChannels() {
 
   const goToLinkedInDetails = () =>
     router.navigate({ to: '/marketing/linkedin-channel' })
+
+  const goToYouTubeDetails = () =>
+    router.navigate({ to: '/marketing/youtube-channel' })
+
+  const startYouTubeOAuth = async () => {
+    setChannelState('youtube', 'connecting')
+    setBusy('youtube-connect')
+    try {
+      const { getYouTubeConnectUrl } = await import('#/lib/marketing')
+      const url = await getYouTubeConnectUrl()
+      window.location.href = url
+    } catch {
+      setChannelState('youtube', 'error')
+      setBanner({ type: 'error', message: 'Failed to start connection. Is the API server running on :8000?' })
+      setBusy(null)
+    }
+  }
+
+  const startFacebookOAuth = async () => {
+    setChannelState('facebook', 'connecting')
+    setBusy('facebook-connect')
+    try {
+      const { getFacebookConnectUrl } = await import('#/lib/marketing')
+      const url = await getFacebookConnectUrl()
+      window.location.href = url
+    } catch {
+      setChannelState('facebook', 'error')
+      setBanner({ type: 'error', message: 'Failed to start connection. Is the API server running on :8000?' })
+      setBusy(null)
+    }
+  }
 
   const startLinkedInOAuth = async () => {
     setChannelState('linkedin', 'connecting')
@@ -179,6 +230,18 @@ function ConnectedChannels() {
         }).catch(() => {
           window.open(LINKEDIN_PROFILE_FALLBACK, '_blank', 'noopener,noreferrer')
         })
+      } else if (type === 'YOUTUBE_CONNECTED') {
+        try { localStorage.setItem('youtube_connection', JSON.stringify(data)) } catch {}
+        setYtLocal(data)
+        setChannelState('youtube', 'success')
+        setBanner({ type: 'success', message: `YouTube connected${data.handle ? ` as ${data.handle}` : ''}` })
+        router.invalidate()
+      } else if (type === 'FACEBOOK_CONNECTED') {
+        try { localStorage.setItem('facebook_connection', JSON.stringify(data)) } catch {}
+        setFbLocal(data)
+        setChannelState('facebook', 'success')
+        setBanner({ type: 'success', message: `Facebook connected${data.page_name ? ` — ${data.page_name}` : ''}` })
+        router.invalidate()
       }
     }
     window.addEventListener('message', onMessage)
@@ -214,9 +277,27 @@ function ConnectedChannels() {
       }).catch(() => {
         window.open(LINKEDIN_PROFILE_FALLBACK, '_blank', 'noopener,noreferrer')
       })
+    } else if (connected === 'youtube') {
+      try {
+        const raw = localStorage.getItem('youtube_connection')
+        if (raw) setYtLocal(JSON.parse(raw))
+      } catch {}
+      window.history.replaceState({}, '', window.location.pathname)
+      router.invalidate()
+      setBanner({ type: 'success', message: 'YouTube connected successfully!' })
+    } else if (connected === 'facebook') {
+      try {
+        const raw = localStorage.getItem('facebook_connection')
+        if (raw) setFbLocal(JSON.parse(raw))
+      } catch {}
+      window.history.replaceState({}, '', window.location.pathname)
+      router.invalidate()
+      setBanner({ type: 'success', message: 'Facebook connected successfully!' })
     } else if (errorParam) {
       const isLinkedIn = errorParam.startsWith('linkedin_')
-      setChannelState(isLinkedIn ? 'linkedin' : 'instagram', 'error')
+      const isYouTube = errorParam.startsWith('youtube_')
+      const isFacebook = errorParam.startsWith('facebook_')
+      setChannelState(isLinkedIn ? 'linkedin' : isYouTube ? 'youtube' : isFacebook ? 'facebook' : 'instagram', 'error')
       const human = ERROR_MESSAGES[errorParam] ?? `Connection failed: ${errorParam.replace(/_/g, ' ')}`
       setBanner({ type: 'error', message: human })
       window.history.replaceState({}, '', window.location.pathname)
@@ -232,6 +313,8 @@ function ConnectedChannels() {
 
   const handleConnect = async (channel: string) => {
     if (channel === 'linkedin') { await checkLinkedInThenAct(); return }
+    if (channel === 'youtube') { await startYouTubeOAuth(); return }
+    if (channel === 'facebook') { await startFacebookOAuth(); return }
     if (channel !== 'instagram') {
       alert(`${CHANNEL_META[channel]?.label ?? channel} connection coming soon.`)
       return
@@ -256,6 +339,14 @@ function ConnectedChannels() {
         try { localStorage.removeItem('linkedin_connection') } catch {}
         setLiLocal(null)
         setLinkedinState('not_connected')
+      } else if (channel === 'youtube') {
+        await disconnectYouTube()
+        try { localStorage.removeItem('youtube_connection') } catch {}
+        setYtLocal(null)
+      } else if (channel === 'facebook') {
+        await disconnectFacebook()
+        try { localStorage.removeItem('facebook_connection') } catch {}
+        setFbLocal(null)
       } else {
         await disconnectInstagram({ data: { channel_id: channel } })
         if (channel === 'instagram') {
@@ -273,9 +364,17 @@ function ConnectedChannels() {
   }
 
   const handleSync = async (channel: string) => {
+    // No /api/facebook/sync yet — and the generic instagram-sync endpoint is
+    // hardcoded to the "instagram" row, so routing facebook through it would
+    // silently touch the wrong channel. Guard here too (not just the button).
+    if (channel === 'facebook') return
     setBusy(`${channel}-sync`)
     try {
-      await syncChannelConnection({ data: { channel } })
+      if (channel === 'youtube') {
+        await getYouTubeStatus()
+      } else {
+        await syncChannelConnection({ data: { channel } })
+      }
       await router.invalidate()
       setBanner({ type: 'success', message: 'Sync completed.' })
     } catch {
@@ -290,9 +389,13 @@ function ConnectedChannels() {
   const handleSyncAll = async () => {
     setBusy('sync-all')
     try {
-      const targets = connectedChannels.map((c) => c.channel)
+      const targets = connectedChannels.map((c) => c.channel).filter((c) => c !== 'facebook')
       for (const channel of targets) {
-        await syncChannelConnection({ data: { channel } })
+        if (channel === 'youtube') {
+          await getYouTubeStatus()
+        } else {
+          await syncChannelConnection({ data: { channel } })
+        }
       }
       await router.invalidate()
       setBanner({
@@ -313,7 +416,9 @@ function ConnectedChannels() {
     const liReconnect = isLinkedIn && linkedinState === 'reconnect_required'
     const localConnected =
       (ch.channel === 'instagram' && igLocal != null) ||
-      (isLinkedIn && liLocal != null)
+      (isLinkedIn && liLocal != null) ||
+      (ch.channel === 'youtube' && ytLocal != null) ||
+      (ch.channel === 'facebook' && fbLocal != null)
     return (ch.status === 'connected' || localConnected) && !liReconnect
   }
 
@@ -331,15 +436,21 @@ function ConnectedChannels() {
     const meta = CHANNEL_META[ch.channel]
     if (!meta) return null
     const isLinkedIn = ch.channel === 'linkedin'
+    const isYouTube = ch.channel === 'youtube'
+    const isFacebook = ch.channel === 'facebook'
     const liReconnect = isLinkedIn && linkedinState === 'reconnect_required'
     const localConnected =
       (ch.channel === 'instagram' && igLocal != null) ||
-      (isLinkedIn && liLocal != null)
+      (isLinkedIn && liLocal != null) ||
+      (isYouTube && ytLocal != null) ||
+      (isFacebook && fbLocal != null)
     const isConnected = (ch.status === 'connected' || localConnected) && !liReconnect
     const displayHandle =
       ch.handle ??
       (ch.channel === 'instagram' ? igLocal?.handle : null) ??
-      (isLinkedIn ? liLocal?.handle : null)
+      (isLinkedIn ? liLocal?.handle : null) ??
+      (isYouTube ? ytLocal?.handle : null) ??
+      (isFacebook ? fbLocal?.handle : null)
 
     const cs = connectState[ch.channel] ?? 'idle'
     const isConnecting = cs === 'connecting'
@@ -381,7 +492,7 @@ function ConnectedChannels() {
                 <MoreHorizontal className="h-4 w-4" />
               </summary>
               <div className="absolute right-0 z-20 mt-1.5 w-52 overflow-hidden rounded-[12px] border border-border bg-card py-1 shadow-float">
-                {!isLinkedIn && (
+                {!isLinkedIn && !isYouTube && !isFacebook && (
                   <button
                     className="flex w-full items-center gap-2 px-3 py-2 text-left text-[13px] text-foreground transition hover:bg-muted disabled:opacity-50"
                     disabled={busy !== null}
@@ -394,6 +505,14 @@ function ConnectedChannels() {
                   <button
                     className="flex w-full items-center gap-2 px-3 py-2 text-left text-[13px] text-foreground transition hover:bg-muted"
                     onClick={goToLinkedInDetails}
+                  >
+                    <Network className="h-3.5 w-3.5" /> Manage connection
+                  </button>
+                )}
+                {isYouTube && (
+                  <button
+                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-[13px] text-foreground transition hover:bg-muted"
+                    onClick={goToYouTubeDetails}
                   >
                     <Network className="h-3.5 w-3.5" /> Manage connection
                   </button>
@@ -479,7 +598,34 @@ function ConnectedChannels() {
                   </Button>
                 </>
               )}
-              {!isLinkedIn && (
+              {isYouTube && (
+                <Button
+                  variant="outline"
+                  className="h-9 px-3.5 text-[12.5px]"
+                  disabled={busy !== null}
+                  onClick={goToYouTubeDetails}
+                >
+                  Manage
+                </Button>
+              )}
+              {isFacebook && (
+                <Button
+                  variant="primary"
+                  className="h-9 px-3.5 text-[12.5px]"
+                  disabled={busy !== null}
+                  onClick={() =>
+                    window.open(
+                      `https://www.facebook.com/${ch.account_id ?? fbLocal?.page_id ?? ''}`,
+                      '_blank',
+                      'noopener,noreferrer',
+                    )
+                  }
+                >
+                  <ExternalLink className="h-3.5 w-3.5" />
+                  Open
+                </Button>
+              )}
+              {!isLinkedIn && !isYouTube && !isFacebook && (
                 <Button
                   variant="outline"
                   className="h-9 px-3.5 text-[12.5px]"
