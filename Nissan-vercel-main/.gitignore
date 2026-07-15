@@ -39,3 +39,8 @@ apps/web/public/posters/
 *.duckdb.wal
 apps/api/.localdb/
 *.sqlite
+# Local database files
+.localdb/
+*.sqlite
+*.sqlite3
+*.db
