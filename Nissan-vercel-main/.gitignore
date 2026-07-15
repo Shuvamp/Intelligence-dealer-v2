@@ -43,4 +43,6 @@ apps/api/.localdb/
 .localdb/
 *.sqlite
 *.sqlite3
+*.dbNissan-vercel-main/apps/api/.localdb/
+*.sqlite
 *.db
