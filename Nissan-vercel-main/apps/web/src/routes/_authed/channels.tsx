@@ -69,6 +69,8 @@ const ERROR_MESSAGES: Record<string, string> = {
   facebook_invalid_code:           'Authorization code expired or already used. Please start the connection again.',
   facebook_meta_api_error:         'Meta API returned an error. Check the API server logs.',
   facebook_callback_failed:        'An unexpected error occurred during Facebook connection. Check the API server logs.',
+  facebook_no_page_token:          'Facebook did not return a page-level access token. Make sure pages_show_list is granted, then reconnect.',
+  facebook_missing_permissions:    'Your Facebook Page token is missing publish permissions (pages_manage_posts / pages_read_engagement). Add them to the Facebook Login for Business Configuration in Meta Developer Console, then reconnect.',
 }
 
 type ConnectState = 'idle' | 'connecting' | 'success' | 'error'
@@ -438,6 +440,7 @@ function ConnectedChannels() {
     const isLinkedIn = ch.channel === 'linkedin'
     const isYouTube = ch.channel === 'youtube'
     const isFacebook = ch.channel === 'facebook'
+    const isInstagram = ch.channel === 'instagram'
     const liReconnect = isLinkedIn && linkedinState === 'reconnect_required'
     const localConnected =
       (ch.channel === 'instagram' && igLocal != null) ||
@@ -625,7 +628,24 @@ function ConnectedChannels() {
                   Open
                 </Button>
               )}
-              {!isLinkedIn && !isYouTube && !isFacebook && (
+              {isInstagram && (
+                <Button
+                  variant="primary"
+                  className="h-9 px-3.5 text-[12.5px]"
+                  disabled={busy !== null}
+                  onClick={() =>
+                    window.open(
+                      `https://www.instagram.com/${(displayHandle ?? '').replace(/^@/, '')}/`,
+                      '_blank',
+                      'noopener,noreferrer',
+                    )
+                  }
+                >
+                  <ExternalLink className="h-3.5 w-3.5" />
+                  Open
+                </Button>
+              )}
+              {!isLinkedIn && !isYouTube && !isFacebook && !isInstagram && (
                 <Button
                   variant="outline"
                   className="h-9 px-3.5 text-[12.5px]"

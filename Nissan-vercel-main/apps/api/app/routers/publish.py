@@ -10,8 +10,10 @@ blocks the others. The response carries a per-platform status block.
     requires req.video_url; skipped with reason="video_required" if absent
   - Facebook : real Page post via app.services.facebook — /photos when an
     image is attached, /feed for text-only
-  - Instagram : graceful "not implemented yet" status (no real push), so the
-    existing connection logic stays intact and the response shape holds.
+  - Instagram : real post via app.services.instagram (media container +
+    media_publish) — requires req.image_url (a publicly-reachable URL, not
+    image_base64 — Instagram's Graph API fetches the image itself); skipped
+    with reason="image_required"/"image_url_required" if unusable.
 """
 import base64
 import logging
@@ -20,8 +22,9 @@ import httpx
 from fastapi import APIRouter
 from pydantic import BaseModel
 
-from app.services import channel_store, linkedin_analytics_store
+from app.services import channel_store, instagram_analytics_store, linkedin_analytics_store
 from app.services.facebook import FacebookPublishError, publish_post as facebook_publish
+from app.services.instagram import InstagramPublishError, publish_post as instagram_publish
 from app.services.linkedin import LinkedInPublishError, publish_post as linkedin_publish
 from app.services.youtube import publish_video_from_url as youtube_publish
 
@@ -117,9 +120,35 @@ async def publish(req: PublishRequest):
                     results[platform] = await facebook_publish(
                         page_id, page_token, req.caption, image_bytes or None,
                     )
+            elif platform == "instagram":
+                ig_user_id = row.get("instagram_id")
+                if not ig_user_id:
+                    logger.error("[publish:instagram] tenant=%s missing instagram_id on connection row", req.tenant_id)
+                    results[platform] = {"status": "error", "error": "Instagram connection missing instagram_id — reconnect"}
+                elif not req.image_url:
+                    # Instagram's Graph API fetches the image itself — a public
+                    # URL is required, image_base64 can't be used here.
+                    results[platform] = {"status": "skipped", "reason": "image_url_required" if req.image_base64 else "image_required"}
+                else:
+                    logger.info(
+                        "[publish:instagram] tenant=%s ig_user_id=%s caption_len=%d",
+                        req.tenant_id, ig_user_id, len(req.caption or ""),
+                    )
+                    results[platform] = await instagram_publish(
+                        ig_user_id, row["access_token"], req.caption, req.image_url,
+                    )
+                    # Record the media ID so the analytics poller can track
+                    # this post's likes/comments — best-effort, never fail publish.
+                    media_id = results[platform].get("post_id") if isinstance(results[platform], dict) else None
+                    if media_id:
+                        try:
+                            await instagram_analytics_store.insert_post(
+                                req.tenant_id, media_id, req.caption or "",
+                                media_type="IMAGE", media_url=req.image_url,
+                            )
+                        except Exception:  # noqa: BLE001
+                            logger.warning("[publish:instagram] could not record media_id %s", media_id)
             else:
-                # Instagram real publishing is not built yet — report it
-                # without breaking the multi-platform response.
                 results[platform] = {
                     "status": "skipped",
                     "reason": "publishing_not_implemented",
@@ -129,6 +158,9 @@ async def publish(req: PublishRequest):
             results[platform] = {"status": "error", "error": str(e)}
         except FacebookPublishError as e:
             logger.error("[publish:facebook] %s", e)
+            results[platform] = {"status": "error", "error": str(e)}
+        except InstagramPublishError as e:
+            logger.error("[publish:instagram] %s", e)
             results[platform] = {"status": "error", "error": str(e)}
         except Exception as e:  # noqa: BLE001 — isolate per-platform failures
             logger.exception("[publish:%s] unexpected error", platform)

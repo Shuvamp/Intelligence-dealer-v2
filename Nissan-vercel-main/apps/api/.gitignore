@@ -4,3 +4,4 @@
 # DuckDB database
 *.duckdb
 *.wal
+**/.localdb/channels.sqlite

@@ -18,7 +18,7 @@ Backward-compatibility guarantees:
 - IST semantics unchanged (db.now_iso() used for all timestamps)
 - One channel's failure never blocks another channel's attempt
 - Poster data:/http split handled identically to the existing router
-- LinkedIn + YouTube: real; Instagram/Facebook: placeholder skipped response
+- LinkedIn, YouTube, Facebook, Instagram: all real publishes
 
 Status is no longer unconditional: a post only moves to "published" if at
 least one targeted channel actually succeeded — otherwise it moves to

@@ -23,6 +23,8 @@ from app.services.linkedin import LinkedInPublishError
 from app.services.linkedin import publish_post as _linkedin_publish
 from app.services.facebook import FacebookPublishError
 from app.services.facebook import publish_post as _facebook_publish
+from app.services.instagram import InstagramPublishError
+from app.services.instagram import publish_post as _instagram_publish
 from app.services.youtube import publish_video_from_url as _youtube_publish
 
 logger = logging.getLogger("app.tools.publishing")
@@ -236,18 +238,63 @@ async def publish_youtube_tool(post: dict) -> dict:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Tool 5 — publish_instagram  (placeholder — preserves existing behaviour)
+# Tool 5 — publish_instagram
 # ─────────────────────────────────────────────────────────────────────────────
 
 async def publish_instagram_tool(post: dict, poster: Optional[dict]) -> dict:
     """
-    Instagram publishing — not implemented yet.
-    Returns the same skipped payload as the existing publish router.
+    Publish to Instagram using the real instagram service (media container +
+    media_publish). Instagram requires an image — text-only posts aren't
+    possible via the Graph API — and the image must be reachable at a public
+    URL (Meta's servers fetch it themselves), so a base64/data: poster can't
+    be used here the way it can for Facebook/LinkedIn.
+
+    Returns {"status": "success", "post_id": "..."} on success,
+    {"status": "error", "error": "..."} on failure,
+    {"status": "skipped", "reason": "not_connected" | "image_required" | "image_url_required"}.
     """
-    logger.info(
-        "[tool:publish_instagram] not_implemented group=%s", post.get("group_id"),
+    tenant_id = post.get("tenant_id", "")
+    row = await asyncio.to_thread(channel_store.get, tenant_id, "instagram")
+    if not (row and row.get("status") == "connected" and row.get("access_token")):
+        logger.info("[tool:publish_instagram] not_connected tenant=%s", tenant_id)
+        return {"status": "skipped", "reason": "not_connected"}
+
+    ig_user_id = row.get("instagram_id")
+    if not ig_user_id:
+        logger.error("[tool:publish_instagram] tenant=%s connected but missing instagram_id", tenant_id)
+        return {"status": "error", "error": "Instagram connection missing instagram_id — reconnect"}
+
+    if not poster:
+        logger.info("[tool:publish_instagram] group=%s skipped: no image attached", post.get("group_id"))
+        return {"status": "skipped", "reason": "image_required"}
+    if poster["type"] != "url":
+        logger.info("[tool:publish_instagram] group=%s skipped: poster is base64, not a public URL", post.get("group_id"))
+        return {"status": "skipped", "reason": "image_url_required"}
+
+    caption = "\n\n".join(
+        part
+        for part in [post.get("caption"), " ".join(post.get("hashtags") or [])]
+        if part
     )
-    return {"status": "skipped", "reason": "publishing_not_implemented"}
+
+    logger.info(
+        "[tool:publish_instagram] group=%s ig_user_id=%s caption_len=%d",
+        post.get("group_id"), ig_user_id, len(caption),
+    )
+
+    try:
+        result = await _instagram_publish(ig_user_id, row["access_token"], caption, poster["payload"])
+        logger.info(
+            "[tool:publish_instagram] success group=%s ig_user_id=%s post_id=%s",
+            post.get("group_id"), ig_user_id, result.get("post_id"),
+        )
+        return result
+    except InstagramPublishError as exc:
+        logger.error("[tool:publish_instagram] group=%s ig_user_id=%s err=%s", post.get("group_id"), ig_user_id, exc)
+        return {"status": "error", "error": str(exc)}
+    except Exception:
+        logger.exception("[tool:publish_instagram] unexpected group=%s ig_user_id=%s", post.get("group_id"), ig_user_id)
+        return {"status": "error", "error": "Unexpected Instagram error"}
 
 
 # ─────────────────────────────────────────────────────────────────────────────

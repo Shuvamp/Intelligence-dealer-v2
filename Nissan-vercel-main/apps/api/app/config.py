@@ -44,6 +44,14 @@ FACEBOOK_PAGE_REDIRECT_URI: str = os.getenv(
 )
 FRONTEND_URL: str = os.getenv("FRONTEND_URL", "http://localhost:5173")
 META_API_VERSION: str = os.getenv("META_API_VERSION", "v20.0")
+# This server's own publicly-reachable base URL. Needed because Instagram's
+# Graph API /media endpoint fetches the image server-side from a URL — it
+# cannot accept raw bytes like Facebook's /photos endpoint does. Relative
+# poster/video paths (e.g. "/posters/x.png") are resolved against this.
+# On localhost this is NOT reachable by Meta's servers — Instagram publish
+# only works once this points at a real public host (deployed, or a tunnel
+# like ngrok in dev).
+API_PUBLIC_URL: str = os.getenv("API_PUBLIC_URL", "http://localhost:8000")
 # Redirect URI for the /auth/instagram/* flow (separate from legacy /api/instagram/*)
 AUTH_REDIRECT_URI: str = os.getenv(
     "AUTH_REDIRECT_URI", "http://localhost:8000/auth/instagram/callback"
@@ -65,6 +73,7 @@ LINKEDIN_API_VERSION: str = os.getenv("LINKEDIN_API_VERSION", "202606")
 # until the app is actually approved — flip to true then reconnect LinkedIn.
 LINKEDIN_ORG_SCOPES_ENABLED: bool = os.getenv("LINKEDIN_ORG_SCOPES_ENABLED", "false").lower() == "true"
 LINKEDIN_ANALYTICS_POLL_SECONDS: int = int(os.getenv("LINKEDIN_ANALYTICS_POLL_SECONDS", "1800"))
+INSTAGRAM_ANALYTICS_POLL_SECONDS: int = int(os.getenv("INSTAGRAM_ANALYTICS_POLL_SECONDS", "1800"))
 
 # ── YouTube / Google OAuth ─────────────────────────────────────────────────
 GOOGLE_CLIENT_ID: str = os.getenv("GOOGLE_CLIENT_ID", "")

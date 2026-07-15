@@ -31,17 +31,20 @@ fits the user's budget, and a task list).
 
 Your ONLY job is to write clear, persuasive NARRATIVE that explains the fixed plan. You MUST NOT change,
 recompute, or contradict any number, and you MUST NOT perform or re-run any SEO/AEO analysis or re-score
-anything. Keep language warm, plain, practical and ROI-focused.
+anything. Keep language warm, plain, practical and ROI-focused. If the input includes a "campaign" block
+with an objective, target_audience, or vehicle_category, weave those into the explanation and rationales
+(e.g. "for lead generation among first-time buyers") — but only when present; never invent them.
 
 Return ONLY a single JSON object with EXACTLY these keys:
 {
   "explanation": "2-4 sentences on WHY the recommended monthly budget is appropriate, referencing the scores and category.",
   "optimization_note": "2-3 sentences on how the plan was optimized to fit the user's budget (what was prioritized, deferred, excluded).",
   "rationales": { "<activity name>": "1 sentence on why this activity earns its allocation", ... },
-  "impacts": { "<task name>": "1 short sentence on the expected business impact of this task", ... },
-  "recommendations": [ { "title": "short", "detail": "1-2 sentences" }, ... ]  // 3 to 6 items
+  "impacts": { "<task name>": "1 short sentence on the expected business impact of this task", ... }
 }
-Use the EXACT activity names and task names from the input. No markdown fences, no extra keys, no commentary."""
+Do NOT include a "recommendations" key — those are generated separately and categorized; freeform
+recommendations here would be dropped. Use the EXACT activity names and task names from the input.
+No markdown fences, no extra keys, no commentary."""
 
 
 def has_groq() -> bool:
@@ -54,6 +57,12 @@ def build_input(
     report: dict | None,
     recommended_budget: int,
     user_budget: int,
+    objective: str | None = None,
+    campaign_duration_days: int | None = None,
+    target_audience: str | None = None,
+    vehicle_category: str | None = None,
+    preferred_channels: list[str] | None = None,
+    region_override: str | None = None,
 ) -> dict:
     context = context or {}
     summary = summary or {}
@@ -77,7 +86,7 @@ def build_input(
         "business": {
             "company_name": summary.get("company_name") or context.get("company_name"),
             "industry": summary.get("industry") or context.get("industry") or "Automotive Dealership",
-            "region": summary.get("region") or context.get("region"),
+            "region": region_override or summary.get("region") or context.get("region"),
             "website": summary.get("website") or context.get("website") or context.get("url"),
             "description": summary.get("description") or context.get("description"),
             "products": summary.get("products") or [],
@@ -94,26 +103,18 @@ def build_input(
         },
         "recommended_budget": recommended_budget,
         "user_budget": user_budget,
+        "campaign": {
+            "objective": objective,
+            "campaign_duration_days": campaign_duration_days,
+            "target_audience": target_audience,
+            "vehicle_category": vehicle_category,
+            "preferred_channels": preferred_channels,
+        },
     }
 
 
 def _s(v) -> str:
     return v.strip() if isinstance(v, str) else ""
-
-
-def _coerce_recommendations(items) -> list[dict]:
-    if not isinstance(items, list):
-        return []
-    out: list[dict] = []
-    for it in items:
-        if isinstance(it, str) and it.strip():
-            out.append({"title": it.strip()[:60], "detail": it.strip()})
-        elif isinstance(it, dict):
-            title = _s(it.get("title"))
-            detail = _s(it.get("detail")) or title
-            if title or detail:
-                out.append({"title": title or detail[:60], "detail": detail})
-    return out
 
 
 def generate_prose(payload: dict, base_plan: dict) -> dict | None:
@@ -174,9 +175,6 @@ def generate_prose(payload: dict, base_plan: dict) -> dict | None:
         out["rationales"] = {str(k): _s(v) for k, v in data["rationales"].items() if _s(v)}
     if isinstance(data.get("impacts"), dict):
         out["impacts"] = {str(k): _s(v) for k, v in data["impacts"].items() if _s(v)}
-    recs = _coerce_recommendations(data.get("recommendations"))
-    if len(recs) >= 3:
-        out["recommendations"] = recs
 
     # Nothing usable came back → treat as failure so the caller keeps deterministic prose.
     return out or None

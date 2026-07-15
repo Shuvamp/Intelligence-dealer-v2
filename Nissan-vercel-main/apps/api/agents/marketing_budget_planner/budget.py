@@ -36,9 +36,94 @@ _RATIONALE: dict[str, str] = {
     "AI Search Optimization": "Structured data and answer-ready content so AI assistants and answer engines cite the dealership.",
     "Email Marketing": "Nurture and re-engagement sequences that convert existing contacts at near-zero marginal cost.",
     "Landing Page Optimization": "Faster, clearer landing pages that convert the traffic you already pay for.",
-    "Video Content": "Model walkarounds and delivery moments that build trust and social reach.",
+    "Video Content": "Model walkarounds and delivery moments — published as YouTube Ads and organic video — that build trust and social reach.",
     "Marketing Tools": "CRM, analytics and automation licences that make every other activity measurable.",
 }
+
+# ── Objective + preferred-channel tilts ─────────────────────────────────────
+# Multiplicative weight bumps applied on top of the seo/aeo gap tilts in
+# allocate(). Keys match ACTIVITIES names exactly — no new activities added.
+OBJECTIVE_TILTS: dict[str, dict[str, float]] = {
+    "lead_generation":     {"Google Ads": 1.3, "Meta Ads": 1.3, "Landing Page Optimization": 1.2},
+    "vehicle_sales":       {"Google Ads": 1.25, "Meta Ads": 1.15, "Video Content": 1.3, "Landing Page Optimization": 1.2},
+    "brand_awareness":     {"Social Media": 1.4, "Video Content": 1.3, "Meta Ads": 1.15},
+    "website_traffic":     {"SEO Content": 1.35, "Google Ads": 1.2, "AI Search Optimization": 1.2},
+    "customer_engagement": {"Email Marketing": 1.5, "Social Media": 1.2},
+}
+
+# User-facing channel labels (spec examples: "Google Search Ads", "YouTube Ads", ...)
+# normalized to the internal ACTIVITIES names above. Unknown labels are ignored.
+CHANNEL_ALIASES: dict[str, str] = {
+    "google search ads": "Google Ads", "google ads": "Google Ads",
+    "meta ads": "Meta Ads", "facebook ads": "Meta Ads", "instagram ads": "Meta Ads",
+    "seo": "SEO Content", "seo content": "SEO Content",
+    "youtube ads": "Video Content", "youtube": "Video Content", "video content": "Video Content", "video": "Video Content",
+    "email marketing": "Email Marketing", "email": "Email Marketing",
+    "social media": "Social Media",
+    "landing page": "Landing Page Optimization", "landing page optimization": "Landing Page Optimization",
+    "ai search optimization": "AI Search Optimization", "aeo": "AI Search Optimization", "answer engine optimization": "AI Search Optimization",
+    "marketing tools": "Marketing Tools",
+}
+
+
+def _normalize_channels(channels: list[str] | None) -> set[str]:
+    if not channels:
+        return set()
+    out: set[str] = set()
+    for c in channels:
+        key = CHANNEL_ALIASES.get((c or "").strip().lower())
+        if key:
+            out.add(key)
+    return out
+
+
+# Objective-tailored strategic tip, shown first in recommendations when the
+# user picked an objective. Kept separate from _recommendations()'s always-on
+# advice below.
+_OBJECTIVE_TIPS: dict[str, tuple[str, str]] = {
+    "lead_generation": (
+        "Prioritize high-intent lead capture",
+        "Push more of the funded budget into Google Ads and the landing page so every visitor converts into a tracked lead.",
+    ),
+    "vehicle_sales": (
+        "Tighten the funnel from ad to test drive",
+        "Pair paid ads with landing-page and video content that showcases the specific model line you're pushing this cycle.",
+    ),
+    "brand_awareness": (
+        "Lean into always-on social + video",
+        "Awareness compounds slower than ads — keep Social Media and Video Content funded even if paid spend gets trimmed.",
+    ),
+    "website_traffic": (
+        "Compound organic traffic before cutting ads",
+        "SEO Content and AI Search Optimization take longer to pay off, so protect their funding even under a tight budget.",
+    ),
+    "customer_engagement": (
+        "Nurture the existing customer base",
+        "Email Marketing has the lowest marginal cost here — use it to re-engage past customers for service and trade-in campaigns.",
+    ),
+}
+
+# Baseline monthly cost-per-lead by business category (INR). Matched by substring,
+# same convention as _CATEGORY_BASE. Drives predict_impact()'s lead volume estimate.
+_CPL_BASE: list[tuple[str, int]] = [
+    ("automotive dealership", 350),
+    ("dealership", 350),
+    ("automotive", 350),
+    ("ecommerce", 250),
+    ("e-commerce", 250),
+    ("retail", 300),
+    ("real estate", 500),
+    ("hospitality", 450),
+    ("healthcare", 400),
+    ("education", 300),
+    ("services", 350),
+]
+_DEFAULT_CPL = 400
+
+# Illustrative average contribution margin per closed sale (INR) — used only to
+# turn a sales estimate into an estimated ROI %. Automotive-oriented, matching
+# this platform's primary use case (Nissan dealerships).
+_AVG_MARGIN_PER_SALE = 45_000
 
 _TASK_MAP: dict[str, list[str]] = {
     "SEO Content": ["Generate Blog Articles", "Create Content Calendar"],
@@ -117,6 +202,24 @@ def _base_for_category(category: str | None) -> int:
     return _DEFAULT_BASE
 
 
+def _cpl_for_category(category: str | None) -> int:
+    cat = (category or "").lower()
+    for key, cpl in _CPL_BASE:
+        if key in cat:
+            return cpl
+    return _DEFAULT_CPL
+
+
+def _num(n: float) -> str:
+    """Indian-grouped plain number string (no currency symbol), e.g. 205000 -> '2,05,000'."""
+    s = str(int(round(n)))
+    if len(s) <= 3:
+        return s
+    last3 = s[-3:]
+    rest = re.sub(r"(?<=\d)(?=(\d\d)+$)", ",", s[:-3])
+    return rest + "," + last3
+
+
 # ── core steps ────────────────────────────────────────────────────────────────
 def derive_recommended(seo: float | int | None, aeo: float | int | None, category: str | None) -> int:
     """A weaker web presence needs more spend to close the gap. Scale the
@@ -127,10 +230,19 @@ def derive_recommended(seo: float | int | None, aeo: float | int | None, categor
     return _round(recommended, 5_000)
 
 
-def allocate(recommended: int, seo: float | int | None, aeo: float | int | None) -> list[dict]:
+def allocate(
+    recommended: int,
+    seo: float | int | None,
+    aeo: float | int | None,
+    objective: str | None = None,
+    preferred_channels: list[str] | None = None,
+) -> list[dict]:
     """Split `recommended` across the activity catalogue, tilting spend toward the
-    weak areas. Guaranteed to sum EXACTLY to `recommended`."""
+    weak areas, the chosen marketing objective, and any explicitly preferred
+    channels. Guaranteed to sum EXACTLY to `recommended`."""
     seo_gap, aeo_gap = _gap(seo), _gap(aeo)
+    obj_tilts = OBJECTIVE_TILTS.get(objective or "", {})
+    preferred = _normalize_channels(preferred_channels)
 
     adj: list[float] = []
     for a in ACTIVITIES:
@@ -144,6 +256,9 @@ def allocate(recommended: int, seo: float | int | None, aeo: float | int | None)
             w *= 1.0 + 0.3 * seo_gap
         elif name == "AI Search Optimization":
             w *= 1.0 + 0.9 * aeo_gap
+        w *= obj_tilts.get(name, 1.0)
+        if name in preferred:
+            w *= 1.25
         adj.append(w)
 
     total_w = sum(adj) or 1.0
@@ -250,6 +365,53 @@ def comparison(recommended: int, opt: dict, seo: float | int | None, aeo: float 
     ]
 
 
+def predict_impact(
+    budget_amount: int,
+    seo: float | int | None,
+    aeo: float | int | None,
+    category: str | None,
+    duration_days: int | None = 30,
+) -> dict:
+    """Deterministic, illustrative business-impact prediction for a monthly
+    `budget_amount` spent over `duration_days`. Every figure is derived from
+    the category's baseline cost-per-lead — same "estimate, never guarantee"
+    spirit as comparison()'s % deltas, but as absolute counts for the
+    dashboard. Never raises; missing inputs fall back to neutral defaults."""
+    months = max(int(duration_days or 30), 1) / 30.0
+    cpl = _cpl_for_category(category)
+    campaign_budget = budget_amount * months
+
+    expected_leads = campaign_budget / cpl if cpl else 0.0
+    website_traffic = expected_leads * 18.0        # ~1 lead per 18 site visits
+    test_drive_bookings = expected_leads * 0.22     # ~22% of leads book a test drive
+    customer_enquiries = expected_leads * 1.4       # broader than qualified leads
+    vehicle_sales = test_drive_bookings * 0.35      # ~35% test-drive-to-sale close rate
+    reach = website_traffic * 12.0
+    impressions = reach * 3.5
+
+    revenue = vehicle_sales * _AVG_MARGIN_PER_SALE
+    roi_pct = int(round(((revenue - campaign_budget) / campaign_budget) * 100)) if campaign_budget > 0 else 0
+
+    return {
+        "expected_leads": int(round(expected_leads)),
+        "expected_leads_display": _num(expected_leads),
+        "website_traffic": int(round(website_traffic)),
+        "website_traffic_display": _num(website_traffic),
+        "test_drive_bookings": int(round(test_drive_bookings)),
+        "test_drive_bookings_display": _num(test_drive_bookings),
+        "customer_enquiries": int(round(customer_enquiries)),
+        "customer_enquiries_display": _num(customer_enquiries),
+        "vehicle_sales": int(round(vehicle_sales)),
+        "vehicle_sales_display": _num(vehicle_sales),
+        "estimated_roi_pct": roi_pct,
+        "estimated_roi_display": f"{'+' if roi_pct >= 0 else ''}{roi_pct}%",
+        "reach": int(round(reach)),
+        "reach_display": _num(reach),
+        "impressions": int(round(impressions)),
+        "impressions_display": _num(impressions),
+    }
+
+
 def execution_plan(opt: dict) -> list[dict]:
     """Platform-executable tasks for the INCLUDED activities only. The activity's
     funded amount is split evenly across its tasks."""
@@ -278,34 +440,82 @@ def execution_plan(opt: dict) -> list[dict]:
     return tasks
 
 
-def _recommendations(payload: dict, recommended: int, opt: dict, seo_gap: float, aeo_gap: float) -> list[dict]:
+_RANK_BY_ACTIVITY: dict[str, int] = {a["activity"]: a["rank"] for a in ACTIVITIES}
+
+
+def _recommendations(
+    payload: dict, recommended: int, opt: dict, seo_gap: float, aeo_gap: float, objective: str | None = None,
+) -> list[dict]:
+    """Always returns exactly 5 insights, one per fixed category, in fixed
+    order — so the dashboard can render 5 AI Business Insight cards
+    (best_channel, optimization, growth, risk, tip) regardless of which
+    specific condition triggered each one's text."""
     biz = payload.get("business") or {}
     region = biz.get("region") or "your city"
     recs: list[dict] = []
 
-    if seo_gap >= 0.3:
+    # 1. best_channel — the funded activity with the top ROI rank.
+    included = [line for line in opt["lines"] if line["status"] == "included"]
+    if included:
+        best = min(included, key=lambda line: _RANK_BY_ACTIVITY.get(line["activity"], 99))
         recs.append({
-            "title": "Lead with SEO content and landing-page fixes",
-            "detail": "The SEO score has the most headroom, so front-load blog content and landing-page conversion work — it compounds and lowers paid-ad dependence over time.",
+            "category": "best_channel",
+            "title": f"Best-performing channel: {best['activity']}",
+            "detail": f"{best['activity']} carries this plan's highest ROI priority and is fully funded at {best['amount_display']} — expect it to move fastest this cycle.",
         })
-    if aeo_gap >= 0.3:
+    else:
         recs.append({
-            "title": "Invest in AI Search Optimization early",
-            "detail": "Answer-engine visibility is weak. Add structured data and answer-ready pages so AI assistants surface the dealership when buyers ask.",
+            "category": "best_channel",
+            "title": "No channel is funded yet",
+            "detail": "Raise the budget so at least the top-priority activity can be funded — nothing is included at this amount.",
         })
-    recs.append({
-        "title": f"Keep paid ads geo-targeted to {region}",
-        "detail": "Concentrate Google and Meta spend on the local catchment to maximize qualified walk-ins per rupee.",
-    })
+
+    # 2. optimization — objective-tailored when an objective was picked, else geo-targeting.
+    if objective in _OBJECTIVE_TIPS:
+        title, detail = _OBJECTIVE_TIPS[objective]
+        recs.append({"category": "optimization", "title": title, "detail": detail})
+    else:
+        recs.append({
+            "category": "optimization",
+            "title": f"Keep paid ads geo-targeted to {region}",
+            "detail": "Concentrate Google and Meta spend on the local catchment to maximize qualified walk-ins per rupee.",
+        })
+
+    # 3. growth — long-term compounding channels.
+    if seo_gap >= 0.3 or aeo_gap >= 0.3:
+        recs.append({
+            "category": "growth",
+            "title": "Compound organic growth with SEO + AEO",
+            "detail": "Front-load blog content, landing-page fixes and answer-ready structured data — these take longer to pay off but lower paid-ad dependence over time.",
+        })
+    else:
+        recs.append({
+            "category": "growth",
+            "title": "Protect long-term channels even when cutting spend",
+            "detail": "SEO Content and AI Search Optimization compound slowly — keep them funded at some level even if paid channels get trimmed first.",
+        })
+
+    # 4. risk
     if opt["removed_count"] > 0:
         recs.append({
-            "title": "Revisit deferred activities next cycle",
-            "detail": "Once early wins free up budget, fund the deferred activities in ROI order rather than adding low-priority spend now.",
+            "category": "risk",
+            "title": "Under-funding risk on deferred activities",
+            "detail": f"{opt['removed_count']} activity(ies) are deferred or excluded at this budget — results will be slower and less complete until they're funded.",
         })
+    else:
+        recs.append({
+            "category": "risk",
+            "title": "Watch for seasonal cost spikes",
+            "detail": "Ad auction prices rise during festival and model-launch periods — keep a 10–15% buffer so paid reach doesn't drop when demand peaks.",
+        })
+
+    # 5. tip
     recs.append({
+        "category": "tip",
         "title": "Track cost-per-lead from day one",
         "detail": "Route every campaign into the CRM so spend can be shifted toward the channels that actually book test drives.",
     })
+
     return recs
 
 
@@ -318,11 +528,15 @@ def build_plan(payload: dict) -> dict:
     combined = analysis.get("combined_score")
     business = payload.get("business") or {}
     category = business.get("industry")
+    campaign = payload.get("campaign") or {}
+    objective = campaign.get("objective")
+    duration_days = campaign.get("campaign_duration_days") or 30
+    preferred_channels = campaign.get("preferred_channels")
 
     recommended = int(payload.get("recommended_budget") or derive_recommended(seo, aeo, category))
     user_budget = int(payload.get("user_budget") or 0)
 
-    rec_breakdown = allocate(recommended, seo, aeo)
+    rec_breakdown = allocate(recommended, seo, aeo, objective=objective, preferred_channels=preferred_channels)
     opt = optimize(rec_breakdown, user_budget)
     seo_gap, aeo_gap = _gap(seo), _gap(aeo)
 
@@ -368,7 +582,11 @@ def build_plan(payload: dict) -> dict:
         ],
         "comparison_table": comparison(recommended, opt, seo, aeo),
         "execution_plan": execution_plan(opt),
-        "recommendations": _recommendations(payload, recommended, opt, seo_gap, aeo_gap),
+        "recommendations": _recommendations(payload, recommended, opt, seo_gap, aeo_gap, objective),
+        "business_impact": {
+            "recommended": predict_impact(recommended, seo, aeo, category, duration_days),
+            "optimized": predict_impact(opt["total"], seo, aeo, category, duration_days),
+        },
         "_recommended_budget": recommended,
         "_user_budget": user_budget,
     }

@@ -357,6 +357,32 @@ async def _stop_linkedin_analytics_poller() -> None:
             pass
 
 
+_instagram_analytics_task: asyncio.Task | None = None
+_instagram_analytics_stop: asyncio.Event | None = None
+
+
+@app.on_event("startup")
+async def _start_instagram_analytics_poller() -> None:
+    global _instagram_analytics_task, _instagram_analytics_stop
+    from app.services.instagram_analytics_poller import run_loop
+    _instagram_analytics_stop = asyncio.Event()
+    _instagram_analytics_task = asyncio.create_task(
+        run_loop(_instagram_analytics_stop), name="instagram-analytics-poller"
+    )
+
+
+@app.on_event("shutdown")
+async def _stop_instagram_analytics_poller() -> None:
+    if _instagram_analytics_stop:
+        _instagram_analytics_stop.set()
+    if _instagram_analytics_task:
+        _instagram_analytics_task.cancel()
+        try:
+            await _instagram_analytics_task
+        except (asyncio.CancelledError, Exception):  # noqa: BLE001
+            pass
+
+
 @app.on_event("startup")
 async def _phase7_startup() -> None:
     _register_event_handlers()

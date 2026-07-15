@@ -533,6 +533,67 @@ export interface LinkedInOrganization {
   name: string
 }
 
+// Instagram's like_count isn't reliably returned for every media type/API
+// version — "unavailable" covers that gracefully (comments still populate
+// independently). No 'mdp_required' here — not applicable to Instagram.
+export type InstagramMetricsStatus = 'ok' | 'unavailable' | 'expired_token' | 'rate_limited' | 'error'
+
+export interface InstagramPostInsight {
+  mediaId: string
+  caption: string | null
+  mediaType: string | null
+  imageUrl: string | null
+  permalink: string | null
+  at: string | null
+  likes: number | null
+  comments: number | null
+  status: InstagramMetricsStatus
+}
+
+export interface InstagramInsights {
+  connected: boolean
+  handle: string | null
+  last_sync: string | null
+  postsTracked: number
+  postsWithStats: number
+  likes: number
+  comments: number
+  engagement: number
+  avgEngagementPerPost: number
+  likesMetricsStatus: InstagramMetricsStatus
+  topPosts: Array<InstagramPostInsight>
+  posts: Array<InstagramPostInsight>
+}
+
+export const getInstagramInsights = createServerFn({ method: 'GET' })
+  .validator((d: AnalyticsRange) => d)
+  .handler(async ({ data }): Promise<InstagramInsights> => {
+    const empty: InstagramInsights = {
+      connected: false, handle: null, last_sync: null,
+      postsTracked: 0, postsWithStats: 0,
+      likes: 0, comments: 0, engagement: 0, avgEngagementPerPost: 0,
+      likesMetricsStatus: 'unavailable',
+      topPosts: [], posts: [],
+    }
+    try {
+      const supabase = getSupabaseServerClient()
+      const { tenantId } = await authCtx(supabase)
+      if (!tenantId) return empty
+      const { start, end } = resolveAnalyticsRange(data)
+      const qs = new URLSearchParams({
+        tenant_id: tenantId,
+        date_from: start.toISOString(),
+        date_to: end.toISOString(),
+      })
+      const res = await fetch(`${FASTAPI_URL}/api/instagram/insights?${qs.toString()}`)
+      if (!res.ok) return empty
+      return (await res.json()) as InstagramInsights
+    } catch (e) {
+      console.error('[getInstagramInsights] failed:', e)
+      return empty
+    }
+  })
+
 export const getLinkedInOrganizations = createServerFn({ method: 'GET' }).handler(
   async (): Promise<{ status: string; organizations: Array<LinkedInOrganization> }> => {
     try {

@@ -1,10 +1,10 @@
 import {
-  Linkedin, ThumbsUp, MessageCircle, Activity, BarChart3, Share2, Users, Eye,
+  Linkedin, Instagram, ThumbsUp, MessageCircle, Activity, BarChart3, Share2, Users, Eye,
   Megaphone, Percent, Plug, CheckCircle2, XCircle, Clock, Trophy, Info, MousePointerClick,
 } from 'lucide-react'
 import { Link } from '@tanstack/react-router'
 import type { ChannelConnection } from '#/lib/types'
-import type { LinkedInInsights, LinkedInPostInsight, AnalyticsChannelCampaign } from '#/lib/marketing'
+import type { LinkedInInsights, LinkedInPostInsight, InstagramInsights, InstagramPostInsight, AnalyticsChannelCampaign } from '#/lib/marketing'
 import { CHANNELS } from './ChannelFilter'
 
 const fmt = (n: number) => n.toLocaleString('en-IN')
@@ -187,6 +187,91 @@ function TopPostRow({ post: p, rank }: { post: LinkedInPostInsight; rank: number
         {p.status === 'ok' && p.engagementRate != null && (
           <span className="flex items-center gap-1 text-[#F59E0B]"><Percent className="h-3 w-3" /> {(p.engagementRate * 100).toFixed(1)}%</span>
         )}
+      </div>
+    </div>
+  )
+}
+
+// ── Instagram insights panel (real likes/comments; no reach/impressions/etc — Instagram has no equivalent here) ───
+export function InstagramInsightsPanel({ data }: { data: InstagramInsights }) {
+  if (!data.connected) {
+    return (
+      <div className="rounded-[18px] border border-[#E5E7EB] bg-white p-6 text-center">
+        <Instagram className="mx-auto mb-2 h-8 w-8 text-[#E1306C]" />
+        <p className="text-[13px] font-semibold text-[#1A1A1A]">Instagram not connected</p>
+        <p className="mt-0.5 text-[11px] text-[#9CA3AF]">Connect Instagram to see post insights.</p>
+        <Link to="/channels" search={{} as any} className="mt-3 inline-block rounded-[10px] bg-[#E1306C] px-3 py-1.5 text-[12px] font-semibold text-white">
+          Connect Instagram
+        </Link>
+      </div>
+    )
+  }
+  const likesOk = data.likesMetricsStatus === 'ok'
+
+  return (
+    <div className="space-y-4">
+      <div className="rounded-[18px] border border-[#E5E7EB] bg-white p-5">
+        <div className="mb-1 flex items-center gap-2">
+          <Instagram className="h-4 w-4 text-[#E1306C]" />
+          <h2 className="text-[14px] font-semibold text-[#1A1A1A]">Instagram Insights</h2>
+          <span className="ml-auto flex items-center gap-1 text-[10px] text-[#9CA3AF]">
+            <Info className="h-3 w-3" /> {data.postsWithStats}/{data.postsTracked} posts with stats
+          </span>
+        </div>
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+          <Metric label="Likes" value={likesOk ? fmt(data.likes) : undefined} icon={<ThumbsUp className="h-4 w-4" />} color="#E1306C" tracked={likesOk} />
+          <Metric label="Comments" value={fmt(data.comments)} icon={<MessageCircle className="h-4 w-4" />} color="#8B5CF6" />
+          <Metric label="Engagement" value={fmt(data.engagement)} icon={<Activity className="h-4 w-4" />} color="#22C55E" />
+          <Metric label="Avg / Post" value={String(data.avgEngagementPerPost)} icon={<BarChart3 className="h-4 w-4" />} color="#F59E0B" />
+        </div>
+        {!likesOk && (
+          <p className="mt-3 text-[10px] text-[#C4C4C4]">
+            Like counts aren't available for every media type/API version — comments and engagement still reflect real data.
+          </p>
+        )}
+      </div>
+
+      <div className="rounded-[18px] border border-[#E5E7EB] bg-white p-5">
+        <div className="mb-3 flex items-center gap-2">
+          <Trophy className="h-4 w-4 text-[#E1306C]" />
+          <h2 className="text-[14px] font-semibold text-[#1A1A1A]">Top Performing Posts</h2>
+        </div>
+        {data.topPosts.length === 0 ? (
+          <p className="py-6 text-center text-[12px] text-[#9CA3AF]">
+            No post stats yet. Newly published Instagram posts appear here once they collect likes/comments.
+          </p>
+        ) : (
+          <div className="space-y-2">
+            {data.topPosts.map((p, i) => <InstagramTopPostRow key={p.mediaId} post={p} rank={i + 1} />)}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function InstagramTopPostRow({ post: p, rank }: { post: InstagramPostInsight; rank: number }) {
+  return (
+    <div className="flex items-center gap-3 rounded-[10px] border border-[#F5F5F5] px-3 py-2">
+      <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#FDF2F8] text-[11px] font-bold text-[#E1306C]">{rank}</span>
+      {p.imageUrl ? (
+        <img src={p.imageUrl} alt="" className="h-10 w-10 shrink-0 rounded-[8px] object-cover" />
+      ) : (
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[8px] bg-[#F5F5F5]">
+          <Instagram className="h-4 w-4 text-[#C4C4C4]" />
+        </div>
+      )}
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-[12px] font-semibold text-[#1A1A1A]">{(p.caption || 'Untitled post').slice(0, 80)}</p>
+        <p className="text-[10px] text-[#9CA3AF]">{p.at ? p.at.substring(0, 10) : ''}</p>
+      </div>
+      <div className="flex shrink-0 flex-wrap items-center justify-end gap-x-2.5 gap-y-1 text-[11px] font-semibold">
+        {p.likes != null ? (
+          <span className="flex items-center gap-1 text-[#E1306C]"><ThumbsUp className="h-3 w-3" /> {fmt(p.likes)}</span>
+        ) : (
+          <span className="text-[10px] font-medium text-[#B0B4BA]">likes unavailable</span>
+        )}
+        <span className="flex items-center gap-1 text-[#8B5CF6]"><MessageCircle className="h-3 w-3" /> {fmt(p.comments ?? 0)}</span>
       </div>
     </div>
   )
