@@ -2,8 +2,9 @@ import { createServerFn } from '@tanstack/react-start'
 import { getSupabaseServerClient } from './supabase.server'
 import { BOARD_COLUMN_FOR_STAGE, BOARD_STAGES, CLOSED_STAGES, WON_STAGES } from './types'
 import type {
-  CampaignPerformance, DemandItem, FunnelStage, IntelligenceOverview, IntelRecommendation,
-  LeadSource, LeadStage, MarketSignal, SignalStatus, SourceAnalytic,
+  CampaignHealth, CampaignPerformance, ChannelAnalytic, DemandItem, FunnelStage,
+  IntelligenceOverview, IntelRecommendation, LeadSource, LeadStage, LostLeadInsight,
+  MarketSignal, PostChannel, SignalStatus, SourceAnalytic, VelocityWeek,
 } from './types'
 
 type LeadRow = {
@@ -182,3 +183,154 @@ export const updateSignalStatus = createServerFn({ method: 'POST' })
     await supabase.from('market_signals').update({ status: data.status, updated_at: new Date().toISOString() }).eq('id', data.id)
     return { ok: true as const }
   })
+
+// ─── Channel Analytics ─────────────────────────────────────────────────────────
+// Per-channel breakdown: post health + campaign attribution from campaigns.channels[].
+export const getChannelAnalytics = createServerFn({ method: 'GET' }).handler(
+  async (): Promise<Array<ChannelAnalytic>> => {
+    const supabase = getSupabaseServerClient()
+    const [postsRes, campaignsRes, insightsRes] = await Promise.all([
+      supabase.from('campaign_posts').select('channel, status, compliance'),
+      supabase.from('campaigns').select('id, channels'),
+      supabase.from('campaign_insights').select('campaign_id, reach, leads_generated, spend'),
+    ])
+    const posts = (postsRes.data ?? []) as Array<{ channel: PostChannel; status: string; compliance: string }>
+    const campaigns = (campaignsRes.data ?? []) as Array<{ id: string; channels: Array<string> }>
+    const insights = (insightsRes.data ?? []) as Array<{ campaign_id: string; reach: number; leads_generated: number; spend: number }>
+
+    const ALL_CHANNELS: Array<PostChannel> = ['instagram', 'facebook', 'google_business', 'whatsapp']
+    return ALL_CHANNELS.map((channel) => {
+      const cp = posts.filter((p) => p.channel === channel)
+      const cc = campaigns.filter((c) => Array.isArray(c.channels) && c.channels.includes(channel))
+      const ids = new Set(cc.map((c) => c.id))
+      const ci = insights.filter((i) => ids.has(i.campaign_id))
+      const totalLeads = ci.reduce((t, i) => t + i.leads_generated, 0)
+      const totalSpend = ci.reduce((t, i) => t + Number(i.spend), 0)
+      return {
+        channel,
+        postCount: cp.length,
+        publishedCount: cp.filter((p) => p.status === 'published').length,
+        pendingCount: cp.filter((p) => p.status === 'pending_approval').length,
+        approvedCompliance: cp.filter((p) => p.compliance === 'approved').length,
+        flaggedCompliance: cp.filter((p) => p.compliance === 'flagged').length,
+        campaignCount: cc.length,
+        reach: ci.reduce((t, i) => t + i.reach, 0),
+        leads: totalLeads,
+        avgCpl: totalLeads > 0 ? Math.round(totalSpend / totalLeads) : 0,
+      }
+    }).filter((c) => c.postCount > 0 || c.campaignCount > 0)
+  },
+)
+
+// ─── Campaign Content Health ───────────────────────────────────────────────────
+// Post-pipeline snapshot: status distribution + compliance pass rate.
+export const getCampaignHealth = createServerFn({ method: 'GET' }).handler(
+  async (): Promise<CampaignHealth> => {
+    const supabase = getSupabaseServerClient()
+    const [postsRes, campsRes] = await Promise.all([
+      supabase.from('campaign_posts').select('status, compliance'),
+      supabase.from('campaigns').select('status'),
+    ])
+    const posts = (postsRes.data ?? []) as Array<{ status: string; compliance: string }>
+    const camps = (campsRes.data ?? []) as Array<{ status: string }>
+    const checked = posts.filter((p) => p.compliance !== 'unchecked')
+    const passRate = checked.length > 0
+      ? Math.round((checked.filter((p) => p.compliance === 'approved').length / checked.length) * 100)
+      : 0
+    return {
+      totalPosts: posts.length,
+      published: posts.filter((p) => p.status === 'published').length,
+      pendingApproval: posts.filter((p) => p.status === 'pending_approval').length,
+      draft: posts.filter((p) => p.status === 'draft').length,
+      rejected: posts.filter((p) => p.status === 'rejected').length,
+      compliancePassRate: passRate,
+      activeCampaigns: camps.filter((c) => c.status === 'active').length,
+      totalCampaigns: camps.length,
+    }
+  },
+)
+
+// ─── Lead Velocity Trend ───────────────────────────────────────────────────────
+// For each lead, derive its ISO week start (Monday) from created_at,
+// then aggregate into 6 weekly buckets. The date in the row drives the bucketing.
+export const getLeadVelocity = createServerFn({ method: 'GET' }).handler(
+  async (): Promise<Array<VelocityWeek>> => {
+    const supabase = getSupabaseServerClient()
+    const sixWeeksAgo = new Date()
+    sixWeeksAgo.setUTCDate(sixWeeksAgo.getUTCDate() - 42)
+
+    const { data } = await supabase
+      .from('leads')
+      .select('created_at, score')
+      .gte('created_at', sixWeeksAgo.toISOString())
+
+    const leads = (data ?? []) as Array<{ created_at: string; score: string }>
+
+    // Given any date, return its Monday (ISO week start) at midnight UTC.
+    function isoWeekStart(date: Date): Date {
+      const d = new Date(date)
+      const day = d.getUTCDay()                 // 0=Sun … 6=Sat
+      const toMonday = day === 0 ? -6 : 1 - day // shift back to Monday
+      d.setUTCDate(d.getUTCDate() + toMonday)
+      d.setUTCHours(0, 0, 0, 0)
+      return d
+    }
+
+    // Aggregate each lead into its ISO week bucket using created_at directly.
+    const buckets = new Map<string, { start: Date; count: number; hot: number }>()
+    for (const lead of leads) {
+      const ws = isoWeekStart(new Date(lead.created_at))
+      const key = ws.toISOString().slice(0, 10)          // "2026-04-28"
+      const b = buckets.get(key) ?? { start: ws, count: 0, hot: 0 }
+      b.count++
+      if (lead.score === 'hot') b.hot++
+      buckets.set(key, b)
+    }
+
+    // Build the 6-week series anchored to the current ISO week.
+    // Weeks with no leads get count=0 — gaps are preserved intentionally.
+    const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+    const fmt = (d: Date) => `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]}`
+
+    const thisWeek = isoWeekStart(new Date())
+    const weeks: Array<VelocityWeek> = []
+
+    for (let w = 5; w >= 0; w--) {
+      const ws = new Date(thisWeek)
+      ws.setUTCDate(ws.getUTCDate() - w * 7)
+      const we = new Date(ws)
+      we.setUTCDate(we.getUTCDate() + 6)
+
+      const key = ws.toISOString().slice(0, 10)
+      const b = buckets.get(key)
+      const label = w === 0 ? `${fmt(ws)} – Today` : `${fmt(ws)} – ${fmt(we)}`
+      weeks.push({ weekLabel: label, count: b?.count ?? 0, hot: b?.hot ?? 0 })
+    }
+
+    return weeks
+  },
+)
+
+// ─── Lost Lead Insights ────────────────────────────────────────────────────────
+// Patterns in lost deals: top vehicle, top source, average budget.
+export const getLostLeadInsights = createServerFn({ method: 'GET' }).handler(
+  async (): Promise<LostLeadInsight> => {
+    const supabase = getSupabaseServerClient()
+    const { data } = await supabase
+      .from('leads')
+      .select('source, vehicle_interest, budget')
+      .eq('stage', 'lost')
+    const lost = (data ?? []) as Array<{ source: string; vehicle_interest: string | null; budget: number | null }>
+    if (lost.length === 0) return { count: 0, topVehicle: '—', topSource: '—', avgBudget: 0 }
+    const byVehicle: Record<string, number> = {}
+    const bySource: Record<string, number> = {}
+    for (const l of lost) {
+      if (l.vehicle_interest) byVehicle[l.vehicle_interest] = (byVehicle[l.vehicle_interest] ?? 0) + 1
+      bySource[l.source] = (bySource[l.source] ?? 0) + 1
+    }
+    const topVehicle = Object.entries(byVehicle).sort((a, b) => b[1] - a[1])[0]?.[0] ?? '—'
+    const topSource = Object.entries(bySource).sort((a, b) => b[1] - a[1])[0]?.[0] ?? '—'
+    const avgBudget = Math.round(lost.reduce((t, l) => t + (l.budget ?? 0), 0) / lost.length)
+    return { count: lost.length, topVehicle, topSource, avgBudget }
+  },
+)
