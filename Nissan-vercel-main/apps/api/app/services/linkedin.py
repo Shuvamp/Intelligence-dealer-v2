@@ -1,17 +1,28 @@
 """LinkedIn OAuth service — token exchange, profile fetch, and UGC publishing."""
 import logging
-from urllib.parse import urlencode
+from urllib.parse import urlencode, quote
 
 import httpx
 
-from app.config import LINKEDIN_CLIENT_ID, LINKEDIN_CLIENT_SECRET, LINKEDIN_REDIRECT_URI
+from app.config import (
+    LINKEDIN_CLIENT_ID,
+    LINKEDIN_CLIENT_SECRET,
+    LINKEDIN_REDIRECT_URI,
+    LINKEDIN_API_VERSION,
+    LINKEDIN_ORG_SCOPES_ENABLED,
+)
 
 logger = logging.getLogger(__name__)
 
 # Reuse CSRF state store from Instagram service (same in-memory map, same TTL)
 from app.services.instagram import create_oauth_state, consume_oauth_state  # noqa: F401
 
+# Org-level analytics (impressions/reach/shares/followers growth/profile views)
+# need rw_organization_admin, which LinkedIn only grants once the app has
+# Marketing Developer Platform (MDP) access — see LINKEDIN_ORG_SCOPES_ENABLED.
 SCOPES = ["openid", "profile", "email", "w_member_social"]
+if LINKEDIN_ORG_SCOPES_ENABLED:
+    SCOPES = SCOPES + ["rw_organization_admin"]
 
 
 def build_oauth_url(state: str) -> str:
@@ -246,7 +257,7 @@ async def publish_post(
         asset_urn=asset_urn, title=title, description=description,
     )
     logger.info("[linkedin:publish] posted %s (image=%s)", post_id, bool(asset_urn))
-    return {"status": "success", "post_id": post_id}
+    return {"status": "success", "post_id": post_id, "asset_urn": asset_urn}
 
 
 async def get_post_stats(access_token: str, urn: str) -> dict | None:
@@ -312,3 +323,226 @@ async def verify_token(access_token: str) -> tuple[str, dict | None]:
         return ("error", None)
     except httpx.HTTPError:
         return ("error", None)
+
+
+# ── Organization analytics (Community Management API / Marketing Developer
+# Platform) — every call below needs the rw_organization_admin permission, only
+# grantable once LinkedIn approves the app for MDP. Until then every one of
+# these returns "mdp_required" (via classify_linkedin_error), which is the
+# expected, correct outcome — not a bug. ─────────────────────────────────────
+
+def _rest_headers(access_token: str) -> dict:
+    return {
+        "Authorization": f"Bearer {access_token}",
+        "Linkedin-Version": LINKEDIN_API_VERSION,
+        "X-Restli-Protocol-Version": "2.0.0",
+    }
+
+
+def classify_linkedin_error(status_code: int) -> str:
+    """Map an HTTP status from a LinkedIn org-analytics call to a stable reason
+    code the poller/UI can act on. 403 is the expected result for any org-only
+    endpoint until the app has Marketing Developer Platform access."""
+    if status_code == 401:
+        return "expired_token"
+    if status_code == 403:
+        return "mdp_required"
+    if status_code == 429:
+        return "rate_limited"
+    return "error"
+
+
+async def list_admin_organizations(access_token: str) -> list[dict] | str:
+    """
+    List the Company Pages (Organizations) the connected member administers.
+
+    Returns a list of {"urn": "urn:li:organization:...", "name": "..."} on
+    success, or a classify_linkedin_error() string on failure (e.g.
+    "mdp_required" when the app/token lacks rw_organization_admin).
+    """
+    try:
+        async with httpx.AsyncClient() as client:
+            r = await client.get(
+                "https://api.linkedin.com/rest/organizationAcls",
+                params={"q": "roleAssignee", "role": "ADMINISTRATOR", "state": "APPROVED"},
+                headers=_rest_headers(access_token),
+                timeout=15,
+            )
+        if r.status_code != 200:
+            logger.warning("[linkedin:orgs] organizationAcls -> %s: %s", r.status_code, r.text[:300])
+            return classify_linkedin_error(r.status_code)
+        elements = r.json().get("elements", [])
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[linkedin:orgs] organizationAcls failed: %s", e)
+        return "error"
+
+    orgs: list[dict] = []
+    for el in elements:
+        org_urn = el.get("organization") or el.get("organizationTarget")
+        if not org_urn:
+            continue
+        name = org_urn
+        try:
+            org_id = org_urn.rsplit(":", 1)[-1]
+            async with httpx.AsyncClient() as client:
+                lr = await client.get(
+                    f"https://api.linkedin.com/rest/organizations/{org_id}",
+                    headers=_rest_headers(access_token),
+                    timeout=10,
+                )
+            if lr.status_code == 200:
+                data = lr.json()
+                name = (data.get("localizedName") or name)
+        except Exception:  # noqa: BLE001 — fall back to the URN as the display name
+            pass
+        orgs.append({"urn": org_urn, "name": name})
+    return orgs
+
+
+async def get_org_share_statistics(access_token: str, org_urn: str, urns: list[str]) -> dict | str:
+    """
+    Lifetime share statistics for specific posts, keyed by URN.
+    Returns {urn: {"likes","comments","shares","impressions","reach","clicks","engagement_rate"}}
+    on success, or a classify_linkedin_error() string on failure.
+    """
+    if not urns:
+        return {}
+    ugc_urns = [u for u in urns if ":ugcPost:" in u]
+    share_urns = [u for u in urns if ":share:" in u]
+    out: dict = {}
+
+    async def _fetch(param_str: str) -> tuple[int, dict | None]:
+        url = (
+            "https://api.linkedin.com/rest/organizationalEntityShareStatistics"
+            f"?q=organizationalEntity&organizationalEntity={quote(org_urn, safe='')}&{param_str}"
+        )
+        async with httpx.AsyncClient() as client:
+            r = await client.get(url, headers=_rest_headers(access_token), timeout=20)
+        return r.status_code, (r.json() if r.status_code == 200 else None)
+
+    try:
+        if ugc_urns:
+            param_str = "&".join(f"ugcPosts[{i}]={quote(u, safe='')}" for i, u in enumerate(ugc_urns))
+            status, data = await _fetch(param_str)
+            if status != 200:
+                return classify_linkedin_error(status)
+            _merge_share_stats(out, data)
+        if share_urns:
+            list_body = ",".join(quote(u, safe="") for u in share_urns)
+            status, data = await _fetch(f"shares=List({list_body})")
+            if status != 200:
+                return classify_linkedin_error(status)
+            _merge_share_stats(out, data)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[linkedin:share-stats] org=%s failed: %s", org_urn, e)
+        return "error"
+    return out
+
+
+def _merge_share_stats(out: dict, data: dict | None) -> None:
+    for el in (data or {}).get("elements", []):
+        urn = el.get("ugcPost") or el.get("share")
+        stats = el.get("totalShareStatistics") or {}
+        if not urn:
+            continue
+        out[urn] = {
+            "likes": int(stats.get("likeCount", 0) or 0),
+            "comments": int(stats.get("commentCount", 0) or 0),
+            "shares": int(stats.get("shareCount", 0) or 0),
+            "impressions": int(stats.get("impressionCount", 0) or 0),
+            "reach": int(stats.get("uniqueImpressionsCount", 0) or 0),
+            "clicks": int(stats.get("clickCount", 0) or 0),
+            "engagement_rate": float(stats.get("engagement", 0) or 0),
+        }
+
+
+async def get_follower_growth(access_token: str, org_urn: str, since_ms: int, until_ms: int) -> int | str:
+    """Net follower growth (organic + paid) for the org in [since_ms, until_ms)."""
+    try:
+        async with httpx.AsyncClient() as client:
+            r = await client.get(
+                "https://api.linkedin.com/rest/organizationalEntityFollowerStatistics",
+                params={
+                    "q": "organizationalEntity",
+                    "organizationalEntity": org_urn,
+                    "timeIntervals": f"(timeRange:(start:{since_ms},end:{until_ms}),timeGranularityType:DAY)",
+                },
+                headers=_rest_headers(access_token),
+                timeout=20,
+            )
+        if r.status_code != 200:
+            logger.warning("[linkedin:followers] org=%s -> %s", org_urn, r.status_code)
+            return classify_linkedin_error(r.status_code)
+        total = 0
+        for el in r.json().get("elements", []):
+            gains = el.get("followerGains") or {}
+            total += int(gains.get("organicFollowerGain", 0) or 0) + int(gains.get("paidFollowerGain", 0) or 0)
+        return total
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[linkedin:followers] org=%s failed: %s", org_urn, e)
+        return "error"
+
+
+async def get_page_views(access_token: str, org_urn: str, since_ms: int, until_ms: int) -> int | str:
+    """Total page/profile views for the org in [since_ms, until_ms)."""
+    try:
+        async with httpx.AsyncClient() as client:
+            r = await client.get(
+                "https://api.linkedin.com/rest/organizationPageStatistics",
+                params={
+                    "q": "organization",
+                    "organization": org_urn,
+                    "timeIntervals": f"(timeRange:(start:{since_ms},end:{until_ms}),timeGranularityType:DAY)",
+                },
+                headers=_rest_headers(access_token),
+                timeout=20,
+            )
+        if r.status_code != 200:
+            logger.warning("[linkedin:pageviews] org=%s -> %s", org_urn, r.status_code)
+            return classify_linkedin_error(r.status_code)
+        total = 0
+        for el in r.json().get("elements", []):
+            views = ((el.get("totalPageStatistics") or {}).get("views") or {})
+            overview = views.get("overviewPageViews") or views.get("allPageViews") or {}
+            total += int(overview.get("pageViews", 0) or 0)
+        return total
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[linkedin:pageviews] org=%s failed: %s", org_urn, e)
+        return "error"
+
+
+async def resolve_asset_url(access_token: str, asset_urn: str) -> tuple[str, int] | None:
+    """
+    Resolve an uploaded image asset (urn:li:digitalmediaAsset:{id}) back to a
+    temporary CDN URL for display. Returns (url, expires_at_ms) or None if the
+    asset can't be resolved (e.g. still processing, or expired/deleted).
+    """
+    try:
+        asset_id = asset_urn.rsplit(":", 1)[-1]
+        async with httpx.AsyncClient() as client:
+            r = await client.get(
+                f"https://api.linkedin.com/rest/assets/{asset_id}",
+                params={"fields": "mediaArtifacts,recipes,id"},
+                headers=_rest_headers(access_token),
+                timeout=15,
+            )
+        if r.status_code != 200:
+            logger.warning("[linkedin:asset] %s -> %s", asset_urn, r.status_code)
+            return None
+        artifacts = r.json().get("mediaArtifacts") or []
+        for artifact in artifacts:
+            for ident in artifact.get("identifiers", []):
+                url = ident.get("identifier")
+                if not url:
+                    continue
+                expires_in_s = ident.get("identifierExpiresInSeconds")
+                if expires_in_s:
+                    import time
+                    expires_at_ms = int(time.time() * 1000) + int(expires_in_s) * 1000
+                else:
+                    expires_at_ms = 0
+                return url, expires_at_ms
+        return None
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[linkedin:asset] %s failed: %s", asset_urn, e)
+        return None

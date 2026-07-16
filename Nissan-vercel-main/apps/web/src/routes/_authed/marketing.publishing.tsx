@@ -27,8 +27,22 @@ const CHANNEL_META: Record<string, { label: string; color: string }> = {
   instagram:       { label: 'Instagram',       color: '#E1306C' },
   facebook:        { label: 'Facebook',        color: '#1877F2' },
   linkedin:        { label: 'LinkedIn',        color: '#0A66C2' },
+  youtube:         { label: 'YouTube',         color: '#FF0000' },
   google_business: { label: 'Google Business', color: '#34A853' },
   whatsapp:        { label: 'WhatsApp',        color: '#25D366' },
+}
+
+// channel_status is a JSON-encoded PublishPlatformResult map, persisted by
+// both the manual "Publish Now" path and the scheduled auto-publisher — see
+// app/services/auto_publisher.py. Malformed/absent → no chips rendered.
+function parseChannelStatus(raw?: string | null): Record<string, { status: string; error?: string; reason?: string }> {
+  if (!raw) return {}
+  try {
+    const parsed = JSON.parse(raw)
+    return typeof parsed === 'object' && parsed ? parsed : {}
+  } catch {
+    return {}
+  }
 }
 
 // Aggregated per-channel publish outcome, shown after a publish completes.
@@ -137,9 +151,14 @@ function Publishing() {
     return gs
   }, [items])
   const rejected = useMemo(() => groupItems(items, 'rejected'), [items])
+  // No channel succeeded on the last attempt (see auto_publisher.py) — distinct
+  // from Published so a broken upload (e.g. YouTube with no video attached)
+  // never reads as "went out fine".
+  const failed = useMemo(() => groupItems(items, 'failed'), [items])
 
   const scheduledCount = items.filter((i) => i.publish_status === 'queued').length
   const publishedCount = items.filter((i) => i.publish_status === 'published').length
+  const failedCount = items.filter((i) => i.publish_status === 'failed').length
 
   const act = async (g: PubGroup, action: 'reject' | 'publish') => {
     const key = `${action}_${g.kind}_${g.group_id}`
@@ -258,6 +277,8 @@ function Publishing() {
           {g.items.map((it, i) => {
             const itemNow = nowIstMinute()
             const itemDue = !it.scheduled_at || it.scheduled_at <= itemNow
+            const chStatus = parseChannelStatus(it.channel_status)
+            const chEntries = Object.entries(chStatus)
             return (
               <div key={`${it.group_id}_${it.date}_${i}`} className="flex items-start gap-3 px-4 py-2.5">
                 <span className="shrink-0 mt-0.5 text-[9px] font-bold px-1.5 py-0.5 rounded-[4px] bg-muted text-muted-foreground">
@@ -269,6 +290,23 @@ function Publishing() {
                   </p>
                   {it.caption && (
                     <p className="text-[11px] text-muted-foreground line-clamp-1">{it.caption}</p>
+                  )}
+                  {/* Per-channel outcome — success/failed/skipped shown separately,
+                      covers both the manual "Publish Now" path and the scheduler. */}
+                  {chEntries.length > 0 && (
+                    <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                      {chEntries.map(([ch, r]) => {
+                        const meta = CHANNEL_META[ch] ?? { label: ch, color: '#6B7280' }
+                        const dot = r.status === 'success' ? '#16A34A' : r.status === 'error' ? '#DC2626' : '#9CA3AF'
+                        const title = `${meta.label}: ${r.status}${r.error || r.reason ? ` — ${r.error ?? r.reason}` : ''}`
+                        return (
+                          <span key={ch} title={title} className="flex items-center gap-1 text-[9px] font-semibold text-muted-foreground">
+                            <span className="h-1.5 w-1.5 rounded-full" style={{ background: dot }} />
+                            {meta.label}
+                          </span>
+                        )
+                      })}
+                    </div>
                   )}
                 </div>
                 <div className="shrink-0 text-right space-y-0.5">
@@ -309,6 +347,12 @@ function Publishing() {
             <p className="text-[18px] font-bold text-green-600 leading-tight">{publishedCount}</p>
             <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Published</p>
           </div>
+          {failedCount > 0 && (
+            <div className="rounded-[12px] border border-red-200 bg-red-50 px-4 py-2 text-center">
+              <p className="text-[18px] font-bold text-red-600 leading-tight">{failedCount}</p>
+              <p className="text-[10px] text-red-700 uppercase tracking-wide">Failed</p>
+            </div>
+          )}
         </div>
       </div>
 
@@ -405,6 +449,23 @@ function Publishing() {
           </div>
         )}
       </div>
+
+      {/* Failed — every targeted channel errored or was skipped (see per-item
+          channel chips above for why, e.g. YouTube with no video attached) */}
+      {failed.length > 0 && (
+        <div>
+          <div className="flex items-center gap-2 mb-1">
+            <XCircle className="h-4 w-4 text-red-600" />
+            <h2 className="text-[15px] font-bold text-foreground">Failed</h2>
+          </div>
+          <p className="text-[11px] text-muted-foreground mb-3">
+            Nothing was published — fix the issue in Content Studio (e.g. attach a video for YouTube) and re-approve.
+          </p>
+          <div className="space-y-3">
+            {failed.map((g) => <GroupCard key={`${g.kind}_${g.group_id}`} g={g} showActions={false} />)}
+          </div>
+        </div>
+      )}
 
       {/* Rejected */}
       {rejected.length > 0 && (

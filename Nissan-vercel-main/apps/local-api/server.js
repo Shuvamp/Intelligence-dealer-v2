@@ -399,6 +399,52 @@ async function initSchema() {
     id VARCHAR PRIMARY KEY, category_key VARCHAR NOT NULL, base_inr INTEGER NOT NULL,
     sort_order INTEGER DEFAULT 100, label VARCHAR, created_at VARCHAR, updated_at VARCHAR
   )`)
+  // LinkedIn analytics — published post URNs + periodic metric snapshots
+  // (mirrors supabase/migrations/0037_linkedin_analytics.sql).
+  await run(`CREATE TABLE linkedin_posts (
+    id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid()::VARCHAR,
+    tenant_id VARCHAR NOT NULL, urn VARCHAR NOT NULL, org_urn VARCHAR,
+    caption VARCHAR, title VARCHAR, image_asset_urn VARCHAR,
+    image_url VARCHAR, image_url_expires_at VARCHAR,
+    published_at VARCHAR, created_at VARCHAR
+  )`)
+  await run(`CREATE TABLE linkedin_post_metrics (
+    id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid()::VARCHAR,
+    tenant_id VARCHAR NOT NULL, post_urn VARCHAR NOT NULL,
+    likes INTEGER, comments INTEGER, shares INTEGER,
+    impressions INTEGER, reach INTEGER, clicks INTEGER, engagement_rate DOUBLE,
+    status VARCHAR NOT NULL, error_message VARCHAR, captured_at VARCHAR
+  )`)
+  await run(`CREATE TABLE linkedin_account_metrics (
+    id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid()::VARCHAR,
+    tenant_id VARCHAR NOT NULL, org_urn VARCHAR,
+    followers_growth INTEGER, profile_views INTEGER,
+    status VARCHAR NOT NULL, error_message VARCHAR, captured_at VARCHAR
+  )`)
+  // Instagram analytics — tracked media (app-published + backfilled organic
+  // posts) + periodic like/comment snapshots
+  // (mirrors supabase/migrations/0039_instagram_analytics.sql).
+  await run(`CREATE TABLE instagram_posts (
+    id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid()::VARCHAR,
+    tenant_id VARCHAR NOT NULL, media_id VARCHAR NOT NULL,
+    caption VARCHAR, media_type VARCHAR, media_url VARCHAR,
+    thumbnail_url VARCHAR, permalink VARCHAR,
+    published_at VARCHAR, created_at VARCHAR
+  )`)
+  await run(`CREATE TABLE instagram_post_metrics (
+    id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid()::VARCHAR,
+    tenant_id VARCHAR NOT NULL, media_id VARCHAR NOT NULL,
+    likes INTEGER, comments INTEGER,
+    status VARCHAR NOT NULL, error_message VARCHAR, captured_at VARCHAR
+  )`)
+  // YouTube channel integration — published video records
+  // (mirrors supabase/migrations/0038_youtube_channel.sql).
+  await run(`CREATE TABLE youtube_videos (
+    id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid()::VARCHAR,
+    tenant_id VARCHAR NOT NULL, video_id VARCHAR NOT NULL, video_url VARCHAR NOT NULL,
+    title VARCHAR, description VARCHAR, privacy_status VARCHAR,
+    published_at VARCHAR, created_at VARCHAR
+  )`)
 }
 
 // ─── Seed ─────────────────────────────────────────────────────────────────────
@@ -1249,7 +1295,10 @@ app.all('/rest/v1/:table', async (req, res) => {
       const inserted = []
       for (const row of body) {
         if (!row.id) row.id = uuidv4()
-        if (!row.created_at) row.created_at = new Date().toISOString()
+        // Metrics/snapshot tables (linkedin_post_metrics, instagram_post_metrics,
+        // etc.) use captured_at instead of created_at and have no such column —
+        // only auto-fill created_at for tables that actually carry it.
+        if (!row.created_at && !('captured_at' in row)) row.created_at = new Date().toISOString()
         const cols = Object.keys(row).join(', ')
         const ph   = Object.keys(row).map(() => '?').join(', ')
         await run(`INSERT INTO ${table} (${cols}) VALUES (${ph})`, Object.values(stringifyRow(row)))

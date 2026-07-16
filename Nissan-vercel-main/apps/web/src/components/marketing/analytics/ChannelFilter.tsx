@@ -6,6 +6,7 @@ export const CHANNELS: Array<{ key: string; label: string; color: string }> = [
   { key: 'linkedin', label: 'LinkedIn', color: '#0A66C2' },
   { key: 'facebook', label: 'Facebook', color: '#1877F2' },
   { key: 'instagram', label: 'Instagram', color: '#E1306C' },
+  { key: 'youtube', label: 'YouTube', color: '#FF0000' },
   { key: 'google_business', label: 'Google Business', color: '#34A853' },
   { key: 'whatsapp', label: 'WhatsApp', color: '#25D366' },
 ]

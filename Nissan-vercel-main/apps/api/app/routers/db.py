@@ -66,7 +66,7 @@ def post_upsert_campaign_days(payload: list = Body(...)) -> dict:
 @router.post("/campaign-days/update-content")
 def post_update_day_content(payload: dict = Body(...)) -> dict:
     fields = {k: payload[k] for k in
-              ("headline", "subheadline", "caption", "hashtags", "cta", "offer", "content_status", "poster_url")
+              ("headline", "subheadline", "caption", "hashtags", "cta", "offer", "content_status", "poster_url", "video_url")
               if k in payload}
     _ok_or_500(
         db.update_day_content,
@@ -95,7 +95,7 @@ def post_upsert_opportunities(payload: list = Body(...)) -> dict:
 @router.post("/opportunities/update-content")
 def post_update_opportunity_content(payload: dict = Body(...)) -> dict:
     fields = {k: payload[k] for k in
-              ("headline", "subheadline", "caption", "hashtags", "cta", "offer", "content_status", "poster_url")
+              ("headline", "subheadline", "caption", "hashtags", "cta", "offer", "content_status", "poster_url", "video_url")
               if k in payload}
     _ok_or_500(db.update_opportunity_content, payload["id"], payload["tenant_id"], fields)
     return {"ok": True}
