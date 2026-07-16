@@ -65,7 +65,6 @@ def _initial_state(extraction_id: str, tenant_id: str, context_id: str, seed_url
         "company": {},
         "technical_seo": {},
         "pages": [],
-        "links": {},
         "products": [],
         "services": [],
         "contact": {},

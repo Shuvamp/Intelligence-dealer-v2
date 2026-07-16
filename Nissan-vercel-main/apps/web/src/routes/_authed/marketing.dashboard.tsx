@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { createFileRoute, Link, useRouter } from '@tanstack/react-router'
 import { Zap, RefreshCw, Info } from 'lucide-react'
-import { getMarketingAnalytics, getChannelStatus, getLinkedInInsights } from '#/lib/marketing'
+import { getMarketingAnalytics, getChannelStatus, getLinkedInInsights, getInstagramInsights } from '#/lib/marketing'
 import type { AnalyticsPreset, AnalyticsRange, AnalyticsCampaignRow } from '#/lib/marketing'
 import { DateRangeFilter } from '#/components/marketing/analytics/DateRangeFilter'
 import { ChannelFilter, CHANNELS } from '#/components/marketing/analytics/ChannelFilter'
@@ -10,7 +10,7 @@ import {
   KpiCards, CampaignLeaderboard, RoiSection, ActivityFeed, NotTracked,
 } from '#/components/marketing/analytics/AnalyticsSections'
 import {
-  ConnectedChannelsCard, LinkedInInsightsPanel, ChannelCampaignsTable,
+  ConnectedChannelsCard, LinkedInInsightsPanel, InstagramInsightsPanel, ChannelCampaignsTable,
 } from '#/components/marketing/analytics/ChannelPanels'
 
 const PRESETS: ReadonlyArray<AnalyticsPreset> = [
@@ -36,17 +36,18 @@ export const Route = createFileRoute('/_authed/marketing/dashboard')({
       : deps.channel === 'all' ? 'all'
       : connected.length === 1 ? connected[0]!
       : 'all'
-    const [analytics, linkedin] = await Promise.all([
+    const [analytics, linkedin, instagram] = await Promise.all([
       getMarketingAnalytics({ data: { ...deps, channel: effectiveChannel } }),
       effectiveChannel === 'linkedin' ? getLinkedInInsights({ data: deps }) : Promise.resolve(null),
+      effectiveChannel === 'instagram' ? getInstagramInsights({ data: deps }) : Promise.resolve(null),
     ])
-    return { analytics, connections, linkedin, effectiveChannel }
+    return { analytics, connections, linkedin, instagram, effectiveChannel }
   },
   component: MarketingDashboard,
 })
 
 function MarketingDashboard() {
-  const { analytics, connections, linkedin, effectiveChannel } = Route.useLoaderData()
+  const { analytics, connections, linkedin, instagram, effectiveChannel } = Route.useLoaderData()
   const search = Route.useSearch()
   const navigate = Route.useNavigate()
   const router = useRouter()
@@ -109,6 +110,13 @@ function MarketingDashboard() {
             </div>
           )}
 
+          {effectiveChannel === 'instagram' && instagram && (
+            <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
+              <div className="lg:col-span-2"><InstagramInsightsPanel data={instagram} /></div>
+              <ConnectedChannelsCard connections={connections} />
+            </div>
+          )}
+
           <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
             <ChannelPerformance data={analytics.channelVolume} />
             <ChannelCampaignsTable rows={analytics.channelCampaigns} channelLabel={channelLabel} />
@@ -116,7 +124,7 @@ function MarketingDashboard() {
 
           <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
             <ActivityFeed items={analytics.activity} filterCampaign={null} onClearFilter={() => {}} />
-            {effectiveChannel !== 'linkedin' && <ConnectedChannelsCard connections={connections} />}
+            {effectiveChannel !== 'linkedin' && effectiveChannel !== 'instagram' && <ConnectedChannelsCard connections={connections} />}
             <NotTracked
               title={`${channelLabel} Performance Metrics`}
               lines={['Reach & impressions per channel', 'Engagement & engagement rate', 'Leads attributed per channel']}

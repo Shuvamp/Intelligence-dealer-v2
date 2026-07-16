@@ -91,6 +91,8 @@ export interface DuckContentFields {
   publish_status?: string | null
   published_at?: string | null
   poster_url?: string | null
+  video_url?: string | null
+  channel_status?: string | null
   selected_channels?: string[] | null
 }
 

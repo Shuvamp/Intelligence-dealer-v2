@@ -1,12 +1,10 @@
 """SEO Agent — authority_trust analyzers: Trust, Local SEO, Brand Authority,
 Conversion Optimization.
 
-Brand Authority and Conversion Optimization prefer extraction["_llm_semantic"]
-(llm_semantic.py) when present — on-page-signal judgment instead of an
-always-WARNING stub — falling back unchanged when no LLM key is configured
-or the call/validation failed for that dimension. Local SEO uses
-weak-but-real NAP (name/address/phone) signal and always attaches a caveat,
-even on a PASS.
+Brand Authority and Conversion Optimization always return WARNING (no
+backlink/social-following/funnel data exists anywhere in the extraction).
+Local SEO uses weak-but-real NAP (name/address/phone) signal and always
+attaches a caveat, even on a PASS.
 """
 from __future__ import annotations
 
@@ -97,10 +95,6 @@ def analyze_local_seo(extraction: dict) -> dict:
 
 
 def analyze_brand_authority(extraction: dict) -> dict:
-    llm_result = (extraction.get("_llm_semantic") or {}).get("Brand Authority")
-    if llm_result:
-        return llm_result
-
     return always_warning(
         "Brand Authority",
         "Brand authority cannot be assessed",
@@ -111,10 +105,6 @@ def analyze_brand_authority(extraction: dict) -> dict:
 
 
 def analyze_conversion_optimization(extraction: dict) -> dict:
-    llm_result = (extraction.get("_llm_semantic") or {}).get("Conversion Optimization")
-    if llm_result:
-        return llm_result
-
     return always_warning(
         "Conversion Optimization",
         "Conversion optimization cannot be assessed",

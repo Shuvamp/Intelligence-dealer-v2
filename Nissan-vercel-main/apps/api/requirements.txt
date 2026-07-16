@@ -19,5 +19,9 @@ faster-whisper
 # Website Extraction Engine (Phase 2) — static HTML parsing only, no JS rendering.
 beautifulsoup4
 lxml
+# YouTube channel integration — Google OAuth + Data API v3 (resumable upload).
+google-api-python-client
+google-auth
+google-auth-oauthlib
 pytest
 pytest-asyncio

@@ -37,3 +37,12 @@ apps/web/public/posters/
 .duckdb/
 *.duckdb
 *.duckdb.wal
+apps/api/.localdb/
+*.sqlite
+# Local database files
+.localdb/
+*.sqlite
+*.sqlite3
+*.dbNissan-vercel-main/apps/api/.localdb/
+*.sqlite
+*.db

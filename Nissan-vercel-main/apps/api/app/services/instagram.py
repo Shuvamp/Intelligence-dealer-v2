@@ -1,4 +1,5 @@
-"""Instagram Graph API — OAuth token exchange and account info fetch."""
+"""Instagram Graph API — OAuth token exchange, account info fetch, and publishing."""
+import logging
 import secrets
 import time
 from urllib.parse import urlencode
@@ -6,16 +7,20 @@ from urllib.parse import urlencode
 import httpx
 
 from app.config import (
+    API_PUBLIC_URL,
     FACEBOOK_APP_ID,
     FACEBOOK_APP_SECRET,
     FACEBOOK_REDIRECT_URI,
     META_API_VERSION,
 )
 
+logger = logging.getLogger(__name__)
+
 SCOPES = [
     "pages_show_list",
     "pages_read_engagement",
     "instagram_basic",
+    "instagram_content_publish",
 ]
 
 # ── CSRF state store ──────────────────────────────────────────────────────────
@@ -171,3 +176,171 @@ async def get_instagram_username(ig_id: str, page_token: str) -> str:
         )
         r.raise_for_status()
         return r.json().get("username", "")
+
+
+# ── Analytics ──────────────────────────────────────────────────────────────
+# Mirrors app/services/linkedin.py's error-classification + best-effort
+# contract: these never raise into the poller/router, they degrade to a
+# status string or an empty/None result instead.
+
+def classify_meta_error(status_code: int) -> str:
+    if status_code == 401:
+        return "expired_token"
+    if status_code == 429:
+        return "rate_limited"
+    return "error"
+
+
+async def get_media_list(ig_user_id: str, access_token: str, limit: int = 50) -> list[dict] | str:
+    """GET /{ig-user-id}/media — recent posts, newest first. Returns the raw
+    media dicts, or a classify_meta_error() status string on failure. Single
+    page only — ponytail: add cursor pagination when a tenant publishes
+    more than `limit` posts in one poll window."""
+    try:
+        async with httpx.AsyncClient() as client:
+            r = await client.get(
+                f"https://graph.facebook.com/{META_API_VERSION}/{ig_user_id}/media",
+                params={
+                    "access_token": access_token,
+                    "fields": "id,caption,media_type,media_url,thumbnail_url,permalink,timestamp",
+                    "limit": limit,
+                },
+                timeout=15,
+            )
+        if not r.is_success:
+            logger.warning("[instagram:analytics] get_media_list failed ig_user_id=%s status=%d body=%s",
+                           ig_user_id, r.status_code, r.text)
+            return classify_meta_error(r.status_code)
+        return r.json().get("data", [])
+    except Exception:  # noqa: BLE001
+        logger.exception("[instagram:analytics] get_media_list crashed ig_user_id=%s", ig_user_id)
+        return "error"
+
+
+async def get_media_stats(media_id: str, access_token: str) -> dict:
+    """GET /{media-id}?fields=id,caption,like_count,comments_count.
+
+    like_count isn't reliably returned for every media type/API version —
+    a 200 response missing it is NOT an error, it degrades likes_status to
+    "unavailable" while comments (generally reliable for Business/Creator
+    accounts) still populate independently.
+    """
+    try:
+        async with httpx.AsyncClient() as client:
+            r = await client.get(
+                f"https://graph.facebook.com/{META_API_VERSION}/{media_id}",
+                params={"access_token": access_token, "fields": "id,caption,like_count,comments_count"},
+                timeout=15,
+            )
+        if not r.is_success:
+            logger.warning("[instagram:analytics] get_media_stats failed media_id=%s status=%d body=%s",
+                           media_id, r.status_code, r.text)
+            return {"likes": None, "comments": None, "likes_status": "unavailable",
+                    "status": classify_meta_error(r.status_code)}
+        body = r.json()
+        likes = body.get("like_count")
+        return {
+            "likes": likes,
+            "comments": body.get("comments_count"),
+            "likes_status": "ok" if likes is not None else "unavailable",
+            "status": "ok",
+        }
+    except Exception:  # noqa: BLE001
+        logger.exception("[instagram:analytics] get_media_stats crashed media_id=%s", media_id)
+        return {"likes": None, "comments": None, "likes_status": "unavailable", "status": "error"}
+
+
+async def get_media_comments(media_id: str, access_token: str, limit: int = 25) -> list[dict]:
+    """GET /{media-id}/comments — top-level comments, newest first. Returns
+    [] on any failure (best-effort, never raises)."""
+    try:
+        async with httpx.AsyncClient() as client:
+            r = await client.get(
+                f"https://graph.facebook.com/{META_API_VERSION}/{media_id}/comments",
+                params={"access_token": access_token, "fields": "id,text,username,timestamp", "limit": limit},
+                timeout=15,
+            )
+        if not r.is_success:
+            logger.warning("[instagram:analytics] get_media_comments failed media_id=%s status=%d body=%s",
+                           media_id, r.status_code, r.text)
+            return []
+        return r.json().get("data", [])
+    except Exception:  # noqa: BLE001
+        logger.exception("[instagram:analytics] get_media_comments crashed media_id=%s", media_id)
+        return []
+
+
+# ── Publishing ─────────────────────────────────────────────────────────────
+# Instagram Content Publishing API — unlike Facebook's /photos (multipart
+# bytes upload), this is a two-step, URL-based flow:
+#   1. POST /{ig-user-id}/media       (image_url, caption) → creation_id
+#   2. POST /{ig-user-id}/media_publish (creation_id)       → published media id
+# Meta's servers fetch image_url themselves — it must be public, no raw bytes.
+
+
+class InstagramPublishError(Exception):
+    """Raised when any step of the Instagram publish flow fails. str(exc)
+    carries the Graph API's own error message, not a generic message."""
+
+
+def to_public_url(url: str) -> str:
+    """Resolve a possibly-relative poster/video path (e.g. "/posters/x.png",
+    as served by this app's own StaticFiles mounts) into an absolute URL
+    Meta's servers can fetch. Already-absolute URLs pass through unchanged."""
+    if url.startswith("http://") or url.startswith("https://"):
+        return url
+    return f"{API_PUBLIC_URL}{url if url.startswith('/') else '/' + url}"
+
+
+async def publish_post(ig_user_id: str, access_token: str, caption: str, image_url: str) -> dict:
+    """
+    Publish an image to an Instagram Business/Creator account.
+
+    Returns {"status": "success", "post_id": "..."} on success. Raises
+    InstagramPublishError (with the full Graph API error body) on failure.
+    """
+    public_url = to_public_url(image_url)
+
+    async with httpx.AsyncClient() as client:
+        logger.info("[instagram:publish] ig_user_id=%s POST /media image_url=%s", ig_user_id, public_url)
+        create_r = await client.post(
+            f"https://graph.facebook.com/{META_API_VERSION}/{ig_user_id}/media",
+            data={"image_url": public_url, "caption": caption, "access_token": access_token},
+            timeout=60,
+        )
+        try:
+            create_body = create_r.json()
+        except ValueError:
+            create_body = {"raw": create_r.text}
+        if create_r.status_code not in (200, 201):
+            error_detail = (create_body.get("error") or {}).get("message") or create_body
+            logger.error("[instagram:publish] ig_user_id=%s media creation FAILED status=%d error=%s",
+                         ig_user_id, create_r.status_code, error_detail)
+            raise InstagramPublishError(f"Instagram media creation failed ({create_r.status_code}): {error_detail}")
+
+        creation_id = create_body.get("id")
+        if not creation_id:
+            raise InstagramPublishError(f"Instagram media creation returned no creation id: {create_body}")
+
+        logger.info("[instagram:publish] ig_user_id=%s POST /media_publish creation_id=%s", ig_user_id, creation_id)
+        publish_r = await client.post(
+            f"https://graph.facebook.com/{META_API_VERSION}/{ig_user_id}/media_publish",
+            data={"creation_id": creation_id, "access_token": access_token},
+            timeout=60,
+        )
+        try:
+            publish_body = publish_r.json()
+        except ValueError:
+            publish_body = {"raw": publish_r.text}
+        if publish_r.status_code not in (200, 201):
+            error_detail = (publish_body.get("error") or {}).get("message") or publish_body
+            logger.error("[instagram:publish] ig_user_id=%s media_publish FAILED status=%d error=%s",
+                         ig_user_id, publish_r.status_code, error_detail)
+            raise InstagramPublishError(f"Instagram publish failed ({publish_r.status_code}): {error_detail}")
+
+    post_id = publish_body.get("id")
+    if not post_id:
+        raise InstagramPublishError(f"Instagram publish returned no post id: {publish_body}")
+
+    logger.info("[instagram:publish] ig_user_id=%s SUCCESS post_id=%s", ig_user_id, post_id)
+    return {"status": "success", "post_id": post_id}

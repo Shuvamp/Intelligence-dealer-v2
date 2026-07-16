@@ -8,7 +8,7 @@ from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 
 from app.config import FRONTEND_URL
-from app.services import channel_store
+from app.services import channel_store, instagram_analytics_store as analytics_store
 from app.services.instagram import (
     build_oauth_url,
     consume_oauth_state,
@@ -18,6 +18,7 @@ from app.services.instagram import (
     get_instagram_account_id,
     get_instagram_username,
     get_long_lived_token,
+    get_media_comments,
     get_token_debug_info,
 )
 
@@ -227,6 +228,118 @@ async def instagram_sync(req: SyncRequest):
     now = datetime.now(timezone.utc).isoformat()
     channel_store.update(req.tenant_id, "instagram", last_sync=now)
     return {"status": "success", "last_sync": now}
+
+
+@router.get("/insights")
+async def instagram_insights(
+    tenant_id: str = Query(...),
+    date_from: str | None = Query(None),
+    date_to: str | None = Query(None),
+):
+    """
+    Instagram insights read from stored snapshots (written by the background
+    analytics poller, app/services/instagram_analytics_poller.py) — not
+    fetched live, so this loads instantly regardless of Graph API latency.
+
+    like_count isn't reliably returned for every media type/API version —
+    when it's missing, likesMetricsStatus degrades to "unavailable" instead
+    of a bare 0, while comments (generally reliable for Business/Creator
+    accounts) still populate independently.
+    """
+    empty = {
+        "connected": False, "handle": None, "last_sync": None,
+        "postsTracked": 0, "postsWithStats": 0,
+        "likes": 0, "comments": 0, "engagement": 0, "avgEngagementPerPost": 0,
+        "likesMetricsStatus": "unavailable",
+        "topPosts": [], "posts": [],
+    }
+
+    row = channel_store.get(tenant_id, "instagram")
+    if not row or row.get("status") != "connected" or not row.get("access_token"):
+        return empty
+
+    posts = await analytics_store.get_posts_for_tenant(tenant_id)
+    if date_from:
+        posts = [p for p in posts if (p.get("published_at") or "") >= date_from]
+    if date_to:
+        posts = [p for p in posts if (p.get("published_at") or "") <= date_to]
+
+    latest_metrics = await analytics_store.get_latest_post_metrics(tenant_id)
+
+    per: list[dict] = []
+    likes = comments = 0
+    # "ok" (likes available on at least one post) wins over any degraded
+    # status; otherwise surface the last-seen degraded status.
+    likes_status = "unavailable"
+    for p in posts:
+        m = latest_metrics.get(p["media_id"])
+        if not m:
+            continue
+        likes += m.get("likes") or 0
+        comments += m.get("comments") or 0
+        if likes_status != "ok" and m.get("status"):
+            likes_status = m["status"]
+        per.append({
+            "mediaId": p["media_id"],
+            "caption": p.get("caption"),
+            "mediaType": p.get("media_type"),
+            "imageUrl": p.get("thumbnail_url") or p.get("media_url"),
+            "permalink": p.get("permalink"),
+            "at": p.get("published_at"),
+            "likes": m.get("likes"),
+            "comments": m.get("comments"),
+            "status": m.get("status"),
+        })
+
+    engagement = likes + comments
+    top = sorted(per, key=lambda x: (x["likes"] or 0) + (x["comments"] or 0), reverse=True)[:10]
+
+    return {
+        "connected": True,
+        "handle": row.get("handle"),
+        "last_sync": row.get("last_sync"),
+        "postsTracked": len(posts),
+        "postsWithStats": len(per),
+        "likes": likes,
+        "comments": comments,
+        "engagement": engagement,
+        "avgEngagementPerPost": round(engagement / len(per), 1) if per else 0,
+        "likesMetricsStatus": likes_status,
+        "topPosts": top,
+        "posts": per,
+    }
+
+
+@router.get("/comments")
+async def instagram_comments(tenant_id: str = Query(...), media_id: str = Query(...)):
+    """On-demand comment text list for one post — not batched into /insights
+    (avoids an N+1 Graph API call per post on every dashboard load/poll tick).
+    Called when a user expands a specific post on the dashboard."""
+    row = channel_store.get(tenant_id, "instagram")
+    if not row or row.get("status") != "connected" or not row.get("access_token"):
+        raise HTTPException(status_code=400, detail="Instagram is not connected")
+    comments = await get_media_comments(media_id, row["access_token"])
+    return {"media_id": media_id, "comments": comments}
+
+
+class RefreshAnalyticsRequest(BaseModel):
+    tenant_id: str
+
+
+@router.post("/analytics/refresh")
+async def instagram_refresh_analytics(req: RefreshAnalyticsRequest):
+    """Manually run one analytics poll for a single tenant (the dashboard's
+    "Refresh analytics" button) instead of waiting for the next scheduled tick."""
+    row = channel_store.get(req.tenant_id, "instagram")
+    if not row or row.get("status") != "connected" or not row.get("access_token"):
+        raise HTTPException(status_code=400, detail="Instagram is not connected")
+    from app.services.instagram_analytics_poller import refresh_tenant
+    try:
+        await refresh_tenant(req.tenant_id, row)
+    except Exception:  # noqa: BLE001
+        logger.exception("[instagram:analytics] manual refresh failed tenant=%s", req.tenant_id)
+        raise HTTPException(status_code=502, detail="Instagram analytics refresh failed")
+    return {"status": "success"}
 
 
 @router.post("/disconnect")

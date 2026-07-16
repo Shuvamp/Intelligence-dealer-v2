@@ -27,10 +27,21 @@ function LoginPage() {
     e.preventDefault()
     setError(null)
     setLoading(true)
-    await signIn({ data: { email, password } })
-    // Hard navigation: load /dashboard fresh via SSR with the new session cookie.
-    // (A client-side navigate races the in-flight session fetch and aborts it.)
-    window.location.href = '/dashboard'
+    try {
+      const res = await signIn({ data: { email, password } })
+      if (!res.ok) {
+        setError(res.message)
+        return
+      }
+      // Hard navigation: load /dashboard fresh via SSR with the new session cookie.
+      // (A client-side navigate races the in-flight session fetch and aborts it.)
+      window.location.href = '/dashboard'
+      return
+    } catch {
+      setError('Sign in failed. Please try again.')
+    } finally {
+      setLoading(false)
+    }
   }
 
   return (
