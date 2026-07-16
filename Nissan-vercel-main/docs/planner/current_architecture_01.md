@@ -4,10 +4,7 @@ Status snapshot of what's actually implemented for Phases 1–7 of the
 Context/SEO/AEO vertical (`feature_master_plan.md` → `01_CONTEXT_PLANNER.md` +
 `02_WEBSITE_EXTRACTION_ENGINE.md` + `03_COMPANY_SUMMARY.md` +
 `04_SEO_AGENT.md` + `05_AEO_AGENT.md` + `06_RECOMMENDATION_ENGINE.md` +
-`07_REPORT_GENERATOR.md`). Phase 8 (production hardening) is **not** built
-yet as a whole, though the post-Phase-7 update below (see "Update — Hybrid
-(Rules + LLM) SEO/AEO Scoring") pulled two narrow Phase-8-adjacent items
-forward: real PageSpeed telemetry and a first LLM-response cache.
+`07_REPORT_GENERATOR.md`). Phase 8 (production hardening) is **not** built yet.
 
 ---
 
@@ -466,23 +463,20 @@ since — unlike Phase 2's crawl pipeline, where nodes have real sequential
 data dependencies — these 24 checks are mutually independent, so one bug
 must not abort the other 23 in a 27-node chain.
 
-**Signal-gap handling** (superseded — see "Update — Hybrid (Rules + LLM) SEO/AEO
-Scoring" below): `WebsiteExtractionResult` originally had no data at all for 7
+**Signal-gap handling**: `WebsiteExtractionResult` has no data at all for 7
 of the 24 dimensions (Performance, Core Web Vitals, Keyword Analysis, Brand
 Authority, Conversion Optimization, Internal Links, External Links — the
-last two because the schema had no link-graph field; `ParsedPage.links`
-existed only transiently in Phase 2's internal crawl state). These always
-returned `WARNING` with an honest explanation via `always_warning()`, never a
+last two because the schema has no link-graph field; `ParsedPage.links`
+exists only transiently in Phase 2's internal crawl state). These always
+return `WARNING` with an honest explanation via `always_warning()`, never a
 fabricated verdict. 4 more dimensions (Security, Accessibility, Content
 Analysis, Local SEO) have weak-but-real signal and always attach one
-informational recommendation noting the evidence limitation, even on PASS —
-this part is unchanged.
+informational recommendation noting the evidence limitation, even on PASS.
 
 **Scoring**: `PASS=2, WARNING=1, FAIL=0` per dimension, equally weighted,
 `overall_score = round(100 * sum / 48)`, grade bands A≥90/B≥75/C≥60/D≥40/
-F<40. At Phase 4 completion the 7 always-WARNING dimensions capped a
-flawless site around 85/B, accepted at the time as a scoring-simplicity
-tradeoff — the post-Phase-7 update below removes this structural cap.
+F<40 — confirmed with user that the 7 always-WARNING dimensions capping a
+flawless site around 85/B is an accepted tradeoff for scoring simplicity.
 
 ## Backend API — `apps/api/app/routers/seo_agent.py`
 
@@ -609,11 +603,7 @@ demonstrated by Phase 4's own 100-195-line theme files):
 **The 11 agents** (spec order = `AGENT_NAMES`), by signal tier:
 - **Strong signal**: Entity Detection (company name + named products/services), Question Detection (FAQ entries phrased as questions), FAQ Analysis (count + schema.org markup), Schema Analysis (AI-answer-friendly schema types — `FAQPage`/`Product`/`Article`/`Organization` — contextually expected based on FAQ/products/blog presence), Trust Analysis (SSL/legal pages/certifications/testimonials, reframed as AI-citation-worthiness), Brand Context (name/description/industry/region completeness).
 - **Weak/caveated signal** (always attach one informational recommendation noting the evidence limitation, even on PASS): Answer Quality (FAQ answer length as a substance proxy, not accuracy-verified), AI Readability (meta title/description + page-title coverage, a structural proxy only), Content Chunking (distinct page types + FAQ + blog post count as a proxy for discrete AI-retrievable units, not paragraph-level), LLM Readability (fraction of FAQ answers/description text falling in a 40-300 character "extractable snippet" band, a length-based proxy).
-- **Pure fallback** (superseded — see "Update — Hybrid (Rules + LLM) SEO/AEO
-  Scoring" below): Citation Analysis — no citation/mention-tracking data
-  existed anywhere in the Phase 2 JSON, so this always returned `WARNING` via
-  `always_warning()`, mirroring Phase 4's own signal-less dimensions (Brand
-  Authority, Conversion Optimization, etc.).
+- **Pure fallback**: Citation Analysis — no citation/mention-tracking data exists anywhere in the Phase 2 JSON, so this always returns `WARNING` via `always_warning()`, mirroring Phase 4's own signal-less dimensions (Brand Authority, Conversion Optimization, etc.).
 
 **Why not reuse Phase 4's 6-field `SeoRecommendation`**: the spec's own
 wording is literally 3 fields ("Why AI search engines may fail" / "How to
@@ -1031,149 +1021,3 @@ stayed the flat recommendations CSV.
 - Full `pytest` run — 241 passed (222 prior + 19 new), no regressions. Full
   `tsc --noEmit` typecheck — zero errors in any file this phase touched
   (pre-existing unrelated errors in `src/lib/leads.ts` predate this phase).
-
----
-
-# Update — Hybrid (Rules + LLM) SEO/AEO Scoring (Phases 2, 4 & 5)
-
-## Overview
-
-Post-Phase-7 update, not a new phase in the master plan's numbering — it
-modifies three already-built phases (Website Extraction, SEO Agent, AEO
-Agent) rather than adding a new vertical stage. Motivation: 7 of SEO's 24
-dimensions and 1 of AEO's 11 were hardcoded `always_warning` stubs (see the
-now-superseded notes in Phases 4 and 5 above) — they always scored `WARNING`
-regardless of the site, which is a **structural cap baked into the scoring
-formula**, not a reflection of real site quality (a flawless SEO site
-topped out around 85/B; see the math below). Fixing this needed two
-different mechanisms, confirmed with the user before implementation:
-
-- **Performance / Core Web Vitals** are infra telemetry — no LLM can
-  honestly assess page-load speed from scraped HTML. Fixed with **real
-  Google PageSpeed Insights data**, not AI.
-- **Internal / External Links** were a **missing-data** bug, not a judgment
-  problem — the extraction crawler already parsed `.links` per page; it was
-  just discarded before reaching `extraction_data`. Fixed by persisting it
-  and scoring it with plain rules — no LLM involved.
-- **Keyword Analysis, Content Analysis, Brand Authority, Conversion
-  Optimization** (SEO) and **Citation Analysis, AI Readability, LLM
-  Readability, Answer Quality** (AEO) are genuinely judgment-based. These
-  became **hybrid**: one batched LLM call per agent scores them as an
-  honest content-based proxy (with explicit caveats about what it can't see
-  — no backlink data, no analytics, no real citation tracking), falling
-  back to the original rule/stub behavior byte-for-byte when no LLM key is
-  configured or a dimension's response fails validation.
-
-## Website Extraction (Phase 2) changes
-
-`ParsedPage` (`nodes/parse.py`) already captured `.text`, `.headings`, and
-`.links` per page during crawl, but the persisted `WebsiteExtractionResult`
-only kept `pages: [{url, title, type}]` — text/headings/links were silently
-dropped before the SEO/AEO agents ever saw them.
-
-| File | Change |
-|---|---|
-| `schema.py` | `PageInfo` gains `text_excerpt` (capped ~2000 chars) + `headings` (capped 20/page). New `LinkEntry` + `LinksInfo` models (`internal_count`/`external_count` = true unique-href totals; `internal`/`external` = capped 150-entry samples for prompt/rule use, not the real count). `WebsiteExtractionResult` gains `links: LinksInfo` |
-| `nodes/parse.py` | `navigation_parser_node` now attaches `text_excerpt`/`headings` per page. New `link_graph_node` (runs after `navigation_parser`) dedupes every page's links by href, classifies internal/external via `fetch.py`'s existing `_same_scope()`, excludes `mailto:`/`tel:` (contact info, handled elsewhere) |
-| `state.py`, `service.py` | `WebsiteExtractionState` and `_initial_state()` gain a `links` field |
-| `nodes/build.py` | `json_builder_node` copies `state.get("links")` into `extraction_data["links"]` |
-| `graph.py` | `link_graph` inserted into `_NODE_ORDER` right after `navigation_parser` |
-
-No table/API changes — `website_extractions.extraction_data` is an
-unstructured JSONB blob, so the richer shape needs no migration.
-
-## SEO Agent (Phase 4) changes
-
-| File | Change |
-|---|---|
-| `app/config.py` | New `PAGESPEED_API_KEY` (same `os.getenv` pattern as `CALENDARIFIC_API_KEY`) |
-| `nodes/pagespeed.py` (new) | `fetch_pagespeed(url)` — PSI v5, mobile strategy, performance category; prefers CrUX **field** data, falls back to Lighthouse **lab** audits when field data is absent (typical for low-traffic dealer sites), tags the result `source: "field"\|"lab"`. Returns `None` on missing key/non-200/timeout/malformed response — never raises, mirrors `_fetch_calendarific`'s (`app/routers/marketing.py`) exact shape. `fetch_pagespeed_node` injects `extraction_data["_pagespeed"]`; URL-keyed with a 24h in-process cache to protect PSI's free-tier quota |
-| `nodes/llm_semantic.py` (new) | `llm_semantic_analysis_node` — one batched `app/llm.py::llm_json()` call (Claude→Groq) scoring Keyword Analysis / Content Analysis / Brand Authority / Conversion Optimization together, mirroring `agents/scoring/nodes.py`'s holistic-single-prompt pattern (not its multi-provider ladder). Each dimension's response is validated **independently** — a malformed one is dropped so it falls back to its own rule/stub, not the whole batch. Content-hash-keyed in-process cache. No-ops (`{}`) when `has_llm()` is false |
-| `nodes/technical.py` | `analyze_performance`/`analyze_core_web_vitals` read `extraction["_pagespeed"]` when present (real PASS/WARNING/FAIL against Google's published thresholds), else fall back to `always_warning()` unchanged |
-| `nodes/links_media.py` | `analyze_internal_links`/`analyze_external_links` now real rule-based checks over `extraction["links"]` (FAIL on zero internal links, WARNING on low density/generic anchor text/external-heavy ratio). Live broken-link HEAD-checking explicitly out of scope (unbounded third-party requests) — flagged as a caveat recommendation, not silently pretended-covered |
-| `nodes/content_seo.py`, `nodes/authority_trust.py` | `analyze_keyword_analysis`, `analyze_content_analysis`, `analyze_brand_authority`, `analyze_conversion_optimization` check `extraction["_llm_semantic"]` first, else existing logic unchanged |
-| `graph.py` | Chain extended: `load_extraction → fetch_pagespeed → llm_semantic_analysis → [24 analyzers] → aggregate_and_build → validator` |
-
-Injection convention: `_pagespeed`/`_llm_semantic` are merged into
-`extraction_data` itself under reserved keys by upstream nodes, so
-`SEOAnalysisState`, `build_node()`, and the aggregator needed zero changes —
-analyzers just check the key first.
-
-## AEO Agent (Phase 5) changes
-
-Added directly inside `nodes.py` (not a new file — matches this phase's
-own single-file rationale at this node count).
-
-| Change | Detail |
-|---|---|
-| `llm_semantic_analysis_node` | Same holistic-batched-call pattern as SEO's, targeting Citation Analysis / AI Readability / LLM Readability / Answer Quality (AEO's 3-field `why_ai_may_fail`/`how_to_improve`/`expected_impact` shape, not SEO's 6-field one). Citation Analysis reframed from "cannot be assessed" to a **citation-readiness** judgment (entity attribution, quotable data-backed statements) with an explicit caveat that real cross-engine citation tracking remains out of scope |
-| `analyze_citation_analysis`, `analyze_ai_readability`, `analyze_llm_readability`, `analyze_answer_quality` | Each checks `extraction["_llm_semantic"]` first, else existing logic unchanged |
-| `graph.py` | Chain extended: `load_extraction → llm_semantic_analysis → [11 analyzers] → aggregate_and_build → validator`. No PageSpeed node — AEO has no infra-telemetry dimension |
-
-## LLM integration convention
-
-All new LLM calls go through `apps/api/app/llm.py::has_llm()`/`llm_json()`
-(Claude primary → Groq fallback, JSON-fence-stripped, `None` on any
-failure) — the shared module its own docstring already declares as the
-intended standard, not `agents/scoring/nodes.py`'s bespoke multi-provider
-ladder (Claude→Groq primary→Groq backup→NVIDIA NIM) or
-`agents/followup/llm.py`'s. Only the *shape* of `scoring/nodes.py`'s
-holistic single-prompt-multi-dimension call was reused — one call per agent
-scoring several dimensions at once, not one call per dimension.
-
-## Why this lifts the score ceiling
-
-`overall_score = 100 × points / (2 × N)`, `PASS=2/WARNING=1/FAIL=0`. Before
-this update, SEO's structural ceiling — even a perfect site, all 17 real
-dimensions PASS — was `100 × (17×2 + 7×1) / 48 ≈ 85`; AEO's was
-`100 × (10×2 + 1×1) / 22 ≈ 95`. After: Performance/CWV can genuinely PASS
-(real PageSpeed data), Internal/External Links can genuinely PASS (real
-link-graph data), and the LLM-scored dimensions can genuinely PASS — no
-dimension is permanently capped, so the ceiling becomes a true 100 for both
-reports. Verified live: a realistic "good" SEO fixture scored **90** (up
-from a would-have-been-≤85, with 3 of the 4 LLM-scored dimensions still
-correctly landing WARNING on genuinely-imperfect content) and AEO scored
-**95**.
-
-## What's intentionally NOT built (still Phase 8)
-
-- Live broken-link HEAD-checking for External Links (bounded best-effort
-  sampling flagged as a future stretch item, not required scope)
-- Persistent (cross-restart, cross-worker) caching — current caching is an
-  in-process dict, lost on restart; a Supabase-backed cache with TTL is the
-  natural Phase 8 follow-up
-- PageSpeed desktop strategy (mobile only, the primary Google ranking
-  signal)
-
-## Verification performed
-
-- Extended `apps/api/tests/agents/test_website_extraction.py` (+11),
-  `test_seo_agent.py` (+19), `test_aeo_agent.py` (+9) — `link_graph_node`
-  classification/dedup, PageSpeed threshold logic, and — the key regression
-  guard — every modified analyzer falls back **byte-for-byte** to its
-  original stub/rule output when `_pagespeed`/`_llm_semantic` is absent (a
-  cache-isolation bug was caught and fixed here: the content-hash LLM cache
-  was leaking mocked responses across tests using the same fixture).
-  Full `pytest` run: **270 passed**, no regressions.
-- Live E2E with a real Groq call (`GROQ_API_KEY` configured in this dev
-  environment) against the `test_seo_agent.py`/`test_aeo_agent.py` fixtures:
-  confirmed the LLM recommendations reference actual fixture content (not a
-  coincidental stub match) — e.g. flagging the fixture's synthetic
-  repeated-character meta description by name.
-- Live E2E against a real dealer site (`vigneshnissan.in`) through the full
-  browser → server-fn → FastAPI → crawl → SEO/AEO pipeline: real link graph
-  (19 internal / 10 external hrefs), real per-page text/headings persisted,
-  real PASS/WARNING/FAIL from the LLM-scored dimensions.
-- **Two environment bugs found and fixed while verifying, unrelated to this
-  update's code but blocking it in this dev environment**: (1)
-  `apps/web/.env.local`'s `VITE_AGENT_API_URL` pointed at `:8009`, where
-  nothing listens (should be the FastAPI agent's actual port) — every
-  server-fn call to the agent failed with a generic `fetch failed`; (2)
-  **uvicorn's `--reload` flag does not reliably pick up file changes on
-  this Windows setup** — restarting the reload-managed process (including
-  via `concurrently`'s auto-restart) kept serving pre-update code
-  indefinitely, confirmed by running an otherwise-identical instance
-  without `--reload`, which picked up every change correctly on the first
-  try. Worth flagging for the team: if a backend change "isn't taking
-  effect" no matter how many times `npm run dev` restarts, suspect this
-  before suspecting the code.

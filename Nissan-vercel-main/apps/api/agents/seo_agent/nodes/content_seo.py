@@ -1,12 +1,10 @@
 """SEO Agent — content_seo analyzers: Page Analysis, Content Analysis,
 Keyword Analysis, Blog, FAQ, Accessibility.
 
-Content Analysis and Keyword Analysis prefer extraction["_llm_semantic"]
-(llm_semantic.py) when present — real content judgment instead of a
-presence-only proxy / always-WARNING stub. Both fall back to their original
-rule-based logic when no LLM key is configured or the call/validation
-failed for that dimension. Accessibility uses a weak-but-real signal and
-always attaches a caveat explaining the check is partial, even on a PASS.
+Keyword Analysis always returns WARNING (no search-volume/ranking data
+exists anywhere in the Phase 2 JSON). Content Analysis and Accessibility use
+weak-but-real signals and always attach a caveat explaining the check is
+partial, even on a PASS.
 """
 from __future__ import annotations
 
@@ -57,10 +55,6 @@ def analyze_page_analysis(extraction: dict) -> dict:
 
 
 def analyze_content_analysis(extraction: dict) -> dict:
-    llm_result = (extraction.get("_llm_semantic") or {}).get("Content Analysis")
-    if llm_result:
-        return llm_result
-
     products = extraction.get("products") or []
     services = extraction.get("services") or []
     blog = extraction.get("blog") or {}
@@ -100,10 +94,6 @@ def analyze_content_analysis(extraction: dict) -> dict:
 
 
 def analyze_keyword_analysis(extraction: dict) -> dict:
-    llm_result = (extraction.get("_llm_semantic") or {}).get("Keyword Analysis")
-    if llm_result:
-        return llm_result
-
     return always_warning(
         "Keyword Analysis",
         "Keyword targeting cannot be assessed",

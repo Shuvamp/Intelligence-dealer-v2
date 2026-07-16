@@ -28,12 +28,12 @@ from .nodes.detect import (
 )
 from .nodes.extract import contact_extractor_node, product_extractor_node, service_extractor_node
 from .nodes.fetch import crawler_node, html_downloader_node, url_validator_node
-from .nodes.parse import html_parser_node, link_graph_node, metadata_parser_node, navigation_parser_node
+from .nodes.parse import html_parser_node, metadata_parser_node, navigation_parser_node
 from .state import WebsiteExtractionState
 
 _NODE_ORDER = [
     "url_validator", "crawler", "html_downloader", "html_parser",
-    "metadata_parser", "navigation_parser", "link_graph",
+    "metadata_parser", "navigation_parser",
     "product_extractor", "service_extractor", "contact_extractor",
     "technology_detector", "blog_detector", "faq_detector", "media_detector", "trust_detector",
     "json_builder", "validator",
@@ -49,7 +49,6 @@ def build_graph() -> StateGraph:
     g.add_node("html_parser", html_parser_node)
     g.add_node("metadata_parser", metadata_parser_node)
     g.add_node("navigation_parser", navigation_parser_node)
-    g.add_node("link_graph", link_graph_node)
     g.add_node("product_extractor", product_extractor_node)
     g.add_node("service_extractor", service_extractor_node)
     g.add_node("contact_extractor", contact_extractor_node)

@@ -310,6 +310,52 @@ async function initSchema() {
     spend DOUBLE DEFAULT 0, cost_per_lead DOUBLE DEFAULT 0,
     conversion_rate DOUBLE DEFAULT 0, captured_at VARCHAR
   )`)
+  // LinkedIn analytics — published post URNs + periodic metric snapshots
+  // (mirrors supabase/migrations/0036_linkedin_analytics.sql).
+  await run(`CREATE TABLE linkedin_posts (
+    id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid()::VARCHAR,
+    tenant_id VARCHAR NOT NULL, urn VARCHAR NOT NULL, org_urn VARCHAR,
+    caption VARCHAR, title VARCHAR, image_asset_urn VARCHAR,
+    image_url VARCHAR, image_url_expires_at VARCHAR,
+    published_at VARCHAR, created_at VARCHAR
+  )`)
+  await run(`CREATE TABLE linkedin_post_metrics (
+    id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid()::VARCHAR,
+    tenant_id VARCHAR NOT NULL, post_urn VARCHAR NOT NULL,
+    likes INTEGER, comments INTEGER, shares INTEGER,
+    impressions INTEGER, reach INTEGER, clicks INTEGER, engagement_rate DOUBLE,
+    status VARCHAR NOT NULL, error_message VARCHAR, captured_at VARCHAR
+  )`)
+  await run(`CREATE TABLE linkedin_account_metrics (
+    id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid()::VARCHAR,
+    tenant_id VARCHAR NOT NULL, org_urn VARCHAR,
+    followers_growth INTEGER, profile_views INTEGER,
+    status VARCHAR NOT NULL, error_message VARCHAR, captured_at VARCHAR
+  )`)
+  // Instagram analytics — tracked media (app-published + backfilled organic
+  // posts) + periodic like/comment snapshots
+  // (mirrors supabase/migrations/0038_instagram_analytics.sql).
+  await run(`CREATE TABLE instagram_posts (
+    id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid()::VARCHAR,
+    tenant_id VARCHAR NOT NULL, media_id VARCHAR NOT NULL,
+    caption VARCHAR, media_type VARCHAR, media_url VARCHAR,
+    thumbnail_url VARCHAR, permalink VARCHAR,
+    published_at VARCHAR, created_at VARCHAR
+  )`)
+  await run(`CREATE TABLE instagram_post_metrics (
+    id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid()::VARCHAR,
+    tenant_id VARCHAR NOT NULL, media_id VARCHAR NOT NULL,
+    likes INTEGER, comments INTEGER,
+    status VARCHAR NOT NULL, error_message VARCHAR, captured_at VARCHAR
+  )`)
+  // YouTube channel integration — published video records
+  // (mirrors supabase/migrations/0037_youtube_channel.sql).
+  await run(`CREATE TABLE youtube_videos (
+    id VARCHAR PRIMARY KEY DEFAULT gen_random_uuid()::VARCHAR,
+    tenant_id VARCHAR NOT NULL, video_id VARCHAR NOT NULL, video_url VARCHAR NOT NULL,
+    title VARCHAR, description VARCHAR, privacy_status VARCHAR,
+    published_at VARCHAR, created_at VARCHAR
+  )`)
   await run(`CREATE TABLE market_signals (
     id VARCHAR PRIMARY KEY, tenant_id VARCHAR, kind VARCHAR, title VARCHAR,
     detail VARCHAR, metric_label VARCHAR, metric_value VARCHAR,
@@ -393,12 +439,6 @@ async function initSchema() {
     status VARCHAR DEFAULT 'queued', report_data VARCHAR, markdown_content VARCHAR, overall_score INTEGER,
     errors VARCHAR DEFAULT '[]', created_at VARCHAR, updated_at VARCHAR, started_at VARCHAR, completed_at VARCHAR
   )`)
-  // Marketing Budget Planner category baselines (migration 0036). Global reference
-  // data (no tenant_id) — baseline monthly marketing spend in INR per category.
-  await run(`CREATE TABLE marketing_budget_benchmarks (
-    id VARCHAR PRIMARY KEY, category_key VARCHAR NOT NULL, base_inr INTEGER NOT NULL,
-    sort_order INTEGER DEFAULT 100, label VARCHAR, created_at VARCHAR, updated_at VARCHAR
-  )`)
 }
 
 // ─── Seed ─────────────────────────────────────────────────────────────────────
@@ -426,25 +466,6 @@ async function seed() {
   // Tenants
   await run(`INSERT INTO tenants VALUES (?,?,?,?,?,?)`, [ABC, 'ABC Nissan', 'Nissan', 'intelligence', 'active', JSON.stringify({ primary_color: '#C3002F', logo_url: null, theme: 'light' })])
   await run(`INSERT INTO tenants VALUES (?,?,?,?,?,?)`, [XYZ, 'XYZ Nissan', 'Nissan', 'growth', 'active', JSON.stringify({ primary_color: '#003366', logo_url: null, theme: 'light' })])
-
-  // Marketing budget category benchmarks (global reference data, migration 0036).
-  const benchmarks = [
-    ['automotive dealership', 150000,  1, 'Automotive dealership'],
-    ['dealership',            150000,  2, 'Dealership'],
-    ['automotive',            150000,  3, 'Automotive'],
-    ['ecommerce',             120000,  4, 'E-commerce'],
-    ['e-commerce',            120000,  5, 'E-commerce'],
-    ['retail',                100000,  6, 'Retail'],
-    ['real estate',           130000,  7, 'Real estate'],
-    ['hospitality',            90000,  8, 'Hospitality'],
-    ['healthcare',            110000,  9, 'Healthcare'],
-    ['education',              80000, 10, 'Education'],
-    ['services',               80000, 11, 'Services'],
-  ]
-  for (const [key, base, order, label] of benchmarks) {
-    await run(`INSERT INTO marketing_budget_benchmarks VALUES (?,?,?,?,?,?,?)`,
-      [uuidv4(), key, base, order, label, now, now])
-  }
 
   // Locations
   await run(`INSERT INTO locations VALUES (?,?,?,?)`, [LOC_VEL, ABC, 'ABC Nissan — Velachery', 'active'])
@@ -1249,7 +1270,10 @@ app.all('/rest/v1/:table', async (req, res) => {
       const inserted = []
       for (const row of body) {
         if (!row.id) row.id = uuidv4()
-        if (!row.created_at) row.created_at = new Date().toISOString()
+        // Metrics/snapshot tables (linkedin_post_metrics, instagram_post_metrics,
+        // etc.) use captured_at instead of created_at and have no such column —
+        // only auto-fill created_at for tables that actually carry it.
+        if (!row.created_at && !('captured_at' in row)) row.created_at = new Date().toISOString()
         const cols = Object.keys(row).join(', ')
         const ph   = Object.keys(row).map(() => '?').join(', ')
         await run(`INSERT INTO ${table} (${cols}) VALUES (${ph})`, Object.values(stringifyRow(row)))

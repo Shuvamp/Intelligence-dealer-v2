@@ -53,10 +53,7 @@ class WebsiteExtractionState(TypedDict):
     # metadata_parser / navigation_parser output
     company: dict[str, Any]
     technical_seo: dict[str, Any]
-    pages: list[dict[str, Any]]  # [{url, title, type, text_excerpt, headings}]
-
-    # link_graph output
-    links: dict[str, Any]  # {internal_count, external_count, internal, external}
+    pages: list[dict[str, Any]]  # [{url, title, type}]
 
     # extract.py output
     products: list[dict[str, Any]]

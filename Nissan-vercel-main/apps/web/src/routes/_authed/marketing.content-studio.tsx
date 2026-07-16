@@ -4,6 +4,7 @@ import {
   getCampaigns, getDuckCampaignDays, getMonthEvents, getAssets,
   saveDayContent, saveEventContent, generateDayContent, generateEventContent, suggestField,
   approveCampaign, approveEvent, generatePosterImage, getChannelStatus,
+  getCurrentTenantId, uploadContentVideo, saveContentVideoUrl,
 } from '#/lib/marketing'
 import {
   Zap, RefreshCw, Hash, Image as ImageIcon, ChevronDown, ChevronLeft, ChevronRight, Car, Download, Calendar,
@@ -39,13 +40,14 @@ function ContentStudioSkeleton() {
 export const Route = createFileRoute('/_authed/marketing/content-studio')({
   loader: async () => {
     const now = new Date()
-    const [campaigns, campaignDays, monthEvents, channels] = await Promise.all([
+    const [campaigns, campaignDays, monthEvents, channels, tenantId] = await Promise.all([
       getCampaigns(),
       getDuckCampaignDays(),
       getMonthEvents({ data: { month: now.getMonth() + 1, year: now.getFullYear() } }),
       getChannelStatus(),
+      getCurrentTenantId(),
     ])
-    return { campaigns, campaignDays, monthEvents, channels }
+    return { campaigns, campaignDays, monthEvents, channels, tenantId }
   },
   pendingComponent: ContentStudioSkeleton,
   component: ContentStudio,
@@ -54,13 +56,14 @@ export const Route = createFileRoute('/_authed/marketing/content-studio')({
 // Preview channel keys. `value` matches the ChannelConnection.channel strings
 // so the picker can be filtered down to connected channels. `x` has no backend
 // connection flow yet, so it stays hidden until a real connection exists.
-type PreviewChannel = PostChannel | 'x' | 'linkedin'
+type PreviewChannel = PostChannel | 'x' | 'linkedin' | 'youtube'
 
 const CHANNELS: Array<{ value: PreviewChannel; label: string; color: string }> = [
   { value: 'instagram',       label: 'Instagram',       color: '#E1306C' },
   { value: 'facebook',        label: 'Facebook',        color: '#1877F2' },
   { value: 'linkedin',        label: 'LinkedIn',        color: '#0A66C2' },
   { value: 'x',               label: 'X / Twitter',     color: '#000000' },
+  { value: 'youtube',         label: 'YouTube',         color: '#FF0000' },
   { value: 'google_business', label: 'Google Business', color: '#34A853' },
   { value: 'whatsapp',        label: 'WhatsApp',        color: '#25D366' },
 ]
@@ -70,9 +73,14 @@ const CHANNEL_RATIOS: Record<string, string> = {
   facebook:         '191/100',
   linkedin:         '191/100',
   x:                '16/9',
+  youtube:          '16/9',
   google_business:  '4/3',
   whatsapp:         '9/16',
 }
+
+// Channels shown in the Publish Channels selector + Channel Preview strip —
+// same set, kept in one place instead of duplicated per usage site.
+const MAIN_CHANNELS = ['facebook', 'instagram', 'linkedin', 'x', 'youtube']
 
 const EVENTS_ID = '__monthly_events__'
 
@@ -113,6 +121,7 @@ interface StudioItem {
   cta: string
   content_status: ContentStatus
   poster_url?: string | null
+  video_url?: string | null
   selected_channels?: string[] | null
 }
 
@@ -134,6 +143,7 @@ function dayToItem(d: CampaignDay): StudioItem {
     cta: d.cta ?? '',
     content_status: d.content_status ?? 'pending',
     poster_url: d.poster_url ?? null,
+    video_url: d.video_url ?? null,
     selected_channels: (d as unknown as { selected_channels?: string[] }).selected_channels ?? null,
   }
 }
@@ -154,6 +164,7 @@ function eventToItem(o: MonthOpportunity): StudioItem {
     cta: o.cta ?? '',
     content_status: o.content_status ?? 'pending',
     poster_url: o.poster_url ?? null,
+    video_url: o.video_url ?? null,
     selected_channels: (o as unknown as { selected_channels?: string[] }).selected_channels ?? null,
   }
 }
@@ -255,7 +266,7 @@ function SuggestButton({ busy, onClick, title }: { busy: boolean; onClick: () =>
 const vehicleAssetCache = new Map<string, MediaAsset | null>()
 
 function ContentStudio() {
-  const { campaigns, campaignDays, monthEvents, channels } = Route.useLoaderData()
+  const { campaigns, campaignDays, monthEvents, channels, tenantId } = Route.useLoaderData()
   const router = useRouter()
 
   // Only channels the user has actually connected drive the preview picker.
@@ -372,9 +383,23 @@ function ContentStudio() {
   posterCacheRef.current = posterCache
   generatingKeysRef.current = generatingKeys
 
+  // Video attachment cache: item.key → URL. Same shape as posterCache, but
+  // written by a manual upload (handleVideoUpload) rather than AI generation
+  // — YouTube's videos.insert needs a real file, which nothing here can generate.
+  const [videoCache, setVideoCache] = useState<Record<string, string>>(() => {
+    const init: Record<string, string> = {}
+    campaignDays.forEach(d => { if (d.video_url) init[`${d.campaign_id}_${d.date}`] = d.video_url })
+    monthEvents.opportunities.forEach(o => { if (o.video_url) init[o.id ?? `${o.date}_${o.name}`] = o.video_url })
+    return init
+  })
+  const [videoUploading, setVideoUploading] = useState<Set<string>>(new Set())
+  const [videoError, setVideoError] = useState<string | null>(null)
+
   // Derived for the currently selected item.
   const currentPosterUrl = posterCache[selectedKey ?? ''] ?? null
   const currentPosterLoading = selectedKey ? generatingKeys.has(selectedKey) : false
+  const currentVideoUrl = videoCache[selectedKey ?? ''] ?? null
+  const currentVideoUploading = selectedKey ? videoUploading.has(selectedKey) : false
 
   const loadItem = (it: StudioItem) => {
     setSelectedKey(it.key)
@@ -645,6 +670,56 @@ function ContentStudio() {
     } finally {
       generatingKeysRef.current.delete(key)
       setGeneratingKeys(prev => { const n = new Set(prev); n.delete(key); return n })
+    }
+  }
+
+  // Attach a video file for YouTube — unlike LinkedIn/IG/FB (image or text
+  // shares), YouTube's videos.insert() needs a real video, which nothing here
+  // can generate. Uploads straight to FastAPI, then persists the returned URL.
+  const handleVideoUpload = async (file: File) => {
+    if (!selectedItem || !tenantId) return
+    if (!file.type.startsWith('video/')) {
+      setVideoError('Please choose a video file (mp4, mov, webm, avi, mkv).')
+      return
+    }
+    const key = selectedItem.key
+    setVideoError(null)
+    setVideoUploading(prev => new Set([...prev, key]))
+    try {
+      const { video_url } = await uploadContentVideo(tenantId, file)
+      await saveContentVideoUrl({
+        data: {
+          kind: selectedItem.kind,
+          campaign_id: selectedItem.campaign_id,
+          day_date: selectedItem.kind === 'day' ? selectedItem.date : undefined,
+          event_id: selectedItem.event_id,
+          video_url,
+        },
+      })
+      setVideoCache(prev => ({ ...prev, [key]: video_url }))
+    } catch (e) {
+      setVideoError(e instanceof Error ? e.message : 'Video upload failed')
+    } finally {
+      setVideoUploading(prev => { const n = new Set(prev); n.delete(key); return n })
+    }
+  }
+
+  const handleVideoRemove = async () => {
+    if (!selectedItem) return
+    const key = selectedItem.key
+    try {
+      await saveContentVideoUrl({
+        data: {
+          kind: selectedItem.kind,
+          campaign_id: selectedItem.campaign_id,
+          day_date: selectedItem.kind === 'day' ? selectedItem.date : undefined,
+          event_id: selectedItem.event_id,
+          video_url: null,
+        },
+      })
+      setVideoCache(prev => { const n = { ...prev }; delete n[key]; return n })
+    } catch (e) {
+      setVideoError(e instanceof Error ? e.message : 'Could not remove video')
     }
   }
 
@@ -1042,8 +1117,7 @@ function ContentStudio() {
 
           {/* ── Publish Channels — compact multi-select dropdown ───────────── */}
           {(() => {
-            const MAIN = ['facebook', 'instagram', 'linkedin', 'x']
-            const mainChannels = CHANNELS.filter((c) => MAIN.includes(c.value))
+            const mainChannels = CHANNELS.filter((c) => MAIN_CHANNELS.includes(c.value))
             const connectedMain = mainChannels.filter((c) => channelDetails[c.value]?.status === 'connected')
             const selectedMeta = selectedChannels
               .map((v) => mainChannels.find((c) => c.value === v))
@@ -1221,6 +1295,63 @@ function ContentStudio() {
               </div>
             )
           })()}
+
+          {/* ── YouTube video attachment — required, unlike the image/text channels ── */}
+          {selectedItem && selectedChannels.includes('youtube') && (
+            <div className="rounded-[10px] border border-[#FF0000]/25 bg-[#FFF5F5] px-3 py-2.5 space-y-1.5">
+              <label className="block text-[11px] font-semibold text-[#C3002F] uppercase tracking-widest">
+                YouTube Video (required)
+              </label>
+              {currentVideoUrl ? (
+                <div className="flex items-center gap-2">
+                  <a
+                    href={currentVideoUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex-1 truncate text-[11px] font-medium text-[#0A66C2] hover:underline"
+                  >
+                    {currentVideoUrl.split('/').pop()}
+                  </a>
+                  <label className="cursor-pointer text-[10px] font-semibold text-muted-foreground hover:text-foreground">
+                    Replace
+                    <input
+                      type="file"
+                      accept="video/*"
+                      className="hidden"
+                      onChange={(e) => { const f = e.target.files?.[0]; if (f) handleVideoUpload(f) }}
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    onClick={handleVideoRemove}
+                    className="text-[10px] font-semibold text-red-600 hover:text-red-800"
+                  >
+                    Remove
+                  </button>
+                </div>
+              ) : currentVideoUploading ? (
+                <p className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                  <Loader2 className="h-3 w-3 animate-spin" /> Uploading…
+                </p>
+              ) : (
+                <label className="flex items-center gap-1.5 cursor-pointer text-[11px] font-semibold text-[#C3002F] hover:text-[#A00027]">
+                  <Plus className="h-3 w-3" /> Attach a video
+                  <input
+                    type="file"
+                    accept="video/*"
+                    className="hidden"
+                    onChange={(e) => { const f = e.target.files?.[0]; if (f) handleVideoUpload(f) }}
+                  />
+                </label>
+              )}
+              {!currentVideoUrl && !currentVideoUploading && (
+                <p className="text-[10px] text-muted-foreground">
+                  YouTube needs a real video file — publishing will be skipped for this channel until one is attached.
+                </p>
+              )}
+              {videoError && <p className="text-[10px] font-semibold text-red-600">{videoError}</p>}
+            </div>
+          )}
 
           {!selectedItem ? (
             <div className="flex h-full flex-col items-center justify-center gap-3 text-center py-16">
@@ -1480,7 +1611,7 @@ function ContentStudio() {
             <div className="px-4 py-3 border-b border-border shrink-0">
               <p className="text-[13px] font-semibold text-foreground mb-2">Channel Preview</p>
               <div className="flex flex-wrap gap-1.5">
-                {CHANNELS.filter((c) => ['facebook', 'instagram', 'linkedin', 'x'].includes(c.value)).map((ch) => {
+                {CHANNELS.filter((c) => MAIN_CHANNELS.includes(c.value)).map((ch) => {
                   const isConn = channelDetails[ch.value]?.status === 'connected'
                   return (
                     <button
@@ -1500,10 +1631,9 @@ function ContentStudio() {
                 })}
               </div>
 
-              {/* All 4 channels — connected = selectable; not connected = greyed */}
+              {/* All main channels — connected = selectable; not connected = greyed */}
               {(() => {
-                const MAIN = ['facebook', 'instagram', 'linkedin', 'x']
-                const mainChs = CHANNELS.filter((c) => MAIN.includes(c.value))
+                const mainChs = CHANNELS.filter((c) => MAIN_CHANNELS.includes(c.value))
                 const connectedCount = mainChs.filter((c) => channelDetails[c.value]?.status === 'connected').length
                 return (
                   <div className="mt-3 space-y-1">

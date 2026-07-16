@@ -1,6 +1,5 @@
 """AEO Agent — all 11 analyzer functions plus the 3 bookkeeping nodes
-(load_extraction, aggregate_and_build, validator), plus the LLM
-semantic-check node, in one file.
+(load_extraction, aggregate_and_build, validator), in one file.
 
 Each analyzer is a pure function `(extraction: dict) -> dict` — no I/O, no
 LangGraph state — directly unit-testable, mirroring seo_agent's node split.
@@ -11,27 +10,16 @@ nodes/ package with near-empty theme files.
 
 Signal tiers (docs/planner/05_AEO_AGENT.md, per the approved plan):
 strong: Entity Detection, Question Detection, FAQ Analysis, Schema Analysis,
-Trust Analysis, Brand Context. hybrid (real LLM judgment when configured,
-weak-signal fallback otherwise): Answer Quality, AI Readability, LLM
-Readability, Citation Analysis — see llm_semantic_analysis_node below,
-which mirrors seo_agent/nodes/llm_semantic.py's holistic single-prompt
-pattern (one call scores several dimensions at once) built on the shared
-app/llm.py::llm_json() client.
+Trust Analysis, Brand Context. weak/caveated: Answer Quality, AI
+Readability, Content Chunking, LLM Readability. pure fallback: Citation
+Analysis (no citations/sources field exists anywhere in the Phase 2 JSON).
 """
 from __future__ import annotations
 
-import hashlib
-import json
-import logging
-
 from pydantic import ValidationError
-
-from app.llm import has_llm, llm_json
 
 from ._common import agent_result_key, always_warning, build_node, rec, result, worst
 from .schema import AGENT_NAMES, AEOAnalysisResult
-
-logger = logging.getLogger(__name__)
 
 _MIN_SNIPPET_LEN = 40
 _MAX_SNIPPET_LEN = 300
@@ -83,10 +71,6 @@ def analyze_question_detection(extraction: dict) -> dict:
 
 
 def analyze_answer_quality(extraction: dict) -> dict:
-    llm_result = (extraction.get("_llm_semantic") or {}).get("Answer Quality")
-    if llm_result:
-        return llm_result
-
     faq = extraction.get("faq") or []
     caveat = rec(
         "Answer substance was estimated only by length, not verified for accuracy",
@@ -151,10 +135,6 @@ def analyze_faq_analysis(extraction: dict) -> dict:
 
 
 def analyze_citation_analysis(extraction: dict) -> dict:
-    llm_result = (extraction.get("_llm_semantic") or {}).get("Citation Analysis")
-    if llm_result:
-        return llm_result
-
     return always_warning(
         "Citation Analysis",
         "Whether AI search engines already cite this site cannot be assessed",
@@ -202,10 +182,6 @@ def analyze_schema_analysis(extraction: dict) -> dict:
 
 
 def analyze_ai_readability(extraction: dict) -> dict:
-    llm_result = (extraction.get("_llm_semantic") or {}).get("AI Readability")
-    if llm_result:
-        return llm_result
-
     seo = extraction.get("technical_seo") or {}
     pages = extraction.get("pages") or []
     has_title = bool(seo.get("meta_title"))
@@ -321,10 +297,6 @@ def analyze_trust_analysis(extraction: dict) -> dict:
 
 
 def analyze_llm_readability(extraction: dict) -> dict:
-    llm_result = (extraction.get("_llm_semantic") or {}).get("LLM Readability")
-    if llm_result:
-        return llm_result
-
     faq = extraction.get("faq") or []
     company = extraction.get("company") or {}
     texts = [f.get("answer") or "" for f in faq]
@@ -389,139 +361,6 @@ def analyze_brand_context(extraction: dict) -> dict:
         )])
 
     return result("Brand Context", "PASS")
-
-
-# ─────────────────────────────────────────────────────────────────────────
-# LLM semantic-check node — one batched call for the 4 hybrid dimensions.
-# ─────────────────────────────────────────────────────────────────────────
-
-_LLM_TARGET_AGENTS = ["Citation Analysis", "AI Readability", "LLM Readability", "Answer Quality"]
-_LLM_VALID_STATUSES = {"PASS", "WARNING", "FAIL"}
-_LLM_VALID_LEVELS = {"high", "medium", "low"}
-_LLM_MAX_PAGES = 5
-_LLM_PAGE_PRIORITY = {"home": 0, "about": 1, "products": 2, "services": 2, "faq": 3, "blog": 4, "contact": 5, "other": 6}
-
-_LLM_SYSTEM_PROMPT = """You are an AEO (Answer Engine Optimization) analyst judging how well a \
-dealership website's content would be understood, extracted, and cited by AI answer engines \
-(ChatGPT, Perplexity, Google AI Overviews) — from scraped content only.
-
-Judge only from the content provided below. You do NOT have access to real citation/mention \
-tracking across AI answer engines, or to any AI's actual extraction behavior. If a dimension \
-genuinely can't be judged confidently from what's provided, say so honestly inside a \
-recommendation rather than fabricating a confident verdict.
-
-Return ONLY a JSON object (no prose, no markdown fences) with exactly these 4 top-level keys: \
-"Citation Analysis", "AI Readability", "LLM Readability", "Answer Quality". Each value must be \
-an object: {"status": "PASS"|"WARNING"|"FAIL", "recommendations": [...]}. Each recommendation \
-object must have exactly these string fields: "why_ai_may_fail", "how_to_improve", \
-"expected_impact" ("high"|"medium"|"low"). Include 1-3 recommendations per dimension.
-
-What each dimension means here (a content-based proxy, not real engine telemetry):
-- Citation Analysis: citation-READINESS — clear entity attribution, quotable/data-backed \
-statements, authoritative tone. (NOT real citation tracking across AI answer engines — say so.)
-- AI Readability: whether the text is self-contained, unambiguous, and extractable as a \
-standalone answer (beyond just meta-tag presence).
-- LLM Readability: whether passages read as natural, extractable snippets an LLM could quote \
-directly (beyond just character-length banding).
-- Answer Quality: whether each FAQ answer substantively and specifically answers its question \
-(beyond just being long enough)."""
-
-_llm_cache: dict[str, dict] = {}
-
-
-def _llm_select_pages(pages: list[dict]) -> list[dict]:
-    with_text = [p for p in pages if p.get("text_excerpt")]
-    with_text.sort(key=lambda p: _LLM_PAGE_PRIORITY.get(p.get("type"), 6))
-    return with_text[:_LLM_MAX_PAGES]
-
-
-def _llm_build_prompt(extraction: dict) -> str:
-    company = extraction.get("company") or {}
-    seo = extraction.get("technical_seo") or {}
-    faq = extraction.get("faq") or []
-    pages = _llm_select_pages(extraction.get("pages") or [])
-
-    payload = {
-        "company": {
-            "name": company.get("name"), "description": company.get("description"),
-            "region": company.get("region"), "industry": company.get("industry"),
-        },
-        "meta": {
-            "title": seo.get("meta_title"), "description": seo.get("meta_description"),
-            "schema_types": seo.get("schema_markup_types"),
-        },
-        "faq": [{"question": f.get("question"), "answer": f.get("answer")} for f in faq[:15]],
-        "pages": [
-            {"type": p.get("type"), "title": p.get("title"), "headings": p.get("headings"), "text": p.get("text_excerpt")}
-            for p in pages
-        ],
-    }
-    return "Website content to judge:\n\n" + json.dumps(payload, ensure_ascii=False, default=str)
-
-
-def _llm_content_hash(extraction: dict) -> str:
-    return hashlib.sha256(_llm_build_prompt(extraction).encode("utf-8")).hexdigest()
-
-
-def _llm_validate_recommendations(raw: object) -> list[dict] | None:
-    if not isinstance(raw, list):
-        return None
-    out = []
-    for item in raw:
-        if not isinstance(item, dict):
-            continue
-        why, how = item.get("why_ai_may_fail"), item.get("how_to_improve")
-        if not (isinstance(why, str) and why and isinstance(how, str) and how):
-            continue
-        out.append({
-            "why_ai_may_fail": why,
-            "how_to_improve": how,
-            "expected_impact": item.get("expected_impact") if item.get("expected_impact") in _LLM_VALID_LEVELS else "medium",
-        })
-    return out or None
-
-
-def _llm_validate_response(raw: dict) -> dict[str, dict]:
-    """Validates each target agent independently — a malformed or missing
-    agent is dropped so it falls back to its rule-based logic, rather than
-    discarding the whole response over one bad field."""
-    validated: dict[str, dict] = {}
-    for agent in _LLM_TARGET_AGENTS:
-        entry = raw.get(agent)
-        if not isinstance(entry, dict):
-            continue
-        status = entry.get("status")
-        if status not in _LLM_VALID_STATUSES:
-            continue
-        recommendations = _llm_validate_recommendations(entry.get("recommendations"))
-        if recommendations is None:
-            continue
-        validated[agent] = {"agent": agent, "status": status, "recommendations": recommendations}
-    return validated
-
-
-def llm_semantic_analysis_node(state: dict) -> dict:
-    extraction = state.get("extraction_data")
-    if not extraction or not has_llm():
-        return {}
-
-    try:
-        cache_key = _llm_content_hash(extraction)
-        cached = _llm_cache.get(cache_key)
-        if cached is not None:
-            validated = cached
-        else:
-            prompt = _llm_build_prompt(extraction)
-            raw = llm_json(prompt, system=_LLM_SYSTEM_PROMPT, temperature=0.3, max_tokens=1800)
-            validated = _llm_validate_response(raw) if raw else {}
-            _llm_cache[cache_key] = validated
-    except Exception:  # noqa: BLE001
-        logger.exception("aeo_agent.llm_semantic_analysis_failed")
-        return {}
-
-    if not validated:
-        return {}
-    return {"extraction_data": {**extraction, "_llm_semantic": {**(extraction.get("_llm_semantic") or {}), **validated}}}
 
 
 _ANALYZERS = {
@@ -611,7 +450,6 @@ def validator_node(state: dict) -> dict:
 __all__ = [
     "_ANALYZERS",
     "load_extraction_node",
-    "llm_semantic_analysis_node",
     "aggregate_and_build_node",
     "validator_node",
 ]

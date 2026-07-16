@@ -69,9 +69,43 @@ export interface ExecutionTask {
   expected_impact: string
 }
 
+export type InsightCategory = 'best_channel' | 'optimization' | 'growth' | 'risk' | 'tip'
+
 export interface RecommendationNote {
+  category: InsightCategory
   title: string
   detail: string
+}
+
+export type MarketingObjective =
+  | 'lead_generation'
+  | 'vehicle_sales'
+  | 'brand_awareness'
+  | 'website_traffic'
+  | 'customer_engagement'
+
+export interface BusinessImpact {
+  expected_leads: number
+  expected_leads_display: string
+  website_traffic: number
+  website_traffic_display: string
+  test_drive_bookings: number
+  test_drive_bookings_display: string
+  customer_enquiries: number
+  customer_enquiries_display: string
+  vehicle_sales: number
+  vehicle_sales_display: string
+  estimated_roi_pct: number
+  estimated_roi_display: string
+  reach: number
+  reach_display: string
+  impressions: number
+  impressions_display: string
+}
+
+export interface BusinessImpactBlock {
+  recommended: BusinessImpact
+  optimized: BusinessImpact
 }
 
 export interface BudgetPlanResult {
@@ -87,11 +121,24 @@ export interface BudgetPlanResult {
   comparison_table: Array<ComparisonRow>
   execution_plan: Array<ExecutionTask>
   recommendations: Array<RecommendationNote>
+  business_impact: BusinessImpactBlock | null
   errors: Array<string>
 }
 
+export interface PlanBudgetInput {
+  context_id: string
+  user_budget: number
+  objective?: MarketingObjective
+  campaign_duration_days?: number
+  target_audience?: string
+  vehicle_category?: string
+  preferred_channels?: Array<string>
+  region?: string
+  skip_llm?: boolean
+}
+
 export const planBudget = createServerFn({ method: 'POST' })
-  .validator((d: { context_id: string; user_budget: number }) => d)
+  .validator((d: PlanBudgetInput) => d)
   .handler(async ({ data }): Promise<BudgetPlanResult> => {
     const supabase = getSupabaseServerClient()
     const tenant_id = await tenantId(supabase)
@@ -99,7 +146,18 @@ export const planBudget = createServerFn({ method: 'POST' })
     const res = await fetch(`${AGENT_BASE}/marketing-budget-planner/plan`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tenant_id, context_id: data.context_id, user_budget: data.user_budget }),
+      body: JSON.stringify({
+        tenant_id,
+        context_id: data.context_id,
+        user_budget: data.user_budget,
+        objective: data.objective,
+        campaign_duration_days: data.campaign_duration_days,
+        target_audience: data.target_audience,
+        vehicle_category: data.vehicle_category,
+        preferred_channels: data.preferred_channels,
+        region: data.region,
+        skip_llm: data.skip_llm ?? false,
+      }),
     })
     if (!res.ok) {
       const err = (await res.json().catch(() => ({ detail: 'Failed to generate budget plan' }))) as { detail?: string }

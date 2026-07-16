@@ -15,17 +15,22 @@ tools and drives every queued post through:
                                                                                                 └─ (all done)  → done → END
 
 Backward-compatibility guarantees:
-- DuckDB schema unchanged (same set_publish_status / list_due_posts calls)
 - IST semantics unchanged (db.now_iso() used for all timestamps)
-- "published" status set unconditionally — per-channel failure never blocks
+- One channel's failure never blocks another channel's attempt
 - Poster data:/http split handled identically to the existing router
-- LinkedIn: real; Instagram/Facebook: placeholder skipped response
+- LinkedIn, YouTube, Facebook, Instagram: all real publishes
+
+Status is no longer unconditional: a post only moves to "published" if at
+least one targeted channel actually succeeded — otherwise it moves to
+"failed" (never silently claims success). The per-channel outcome is
+persisted as `channel_status` (JSON) — see _update_status.
 
 Entrypoint: ``run_publishing_tick()`` — called by auto_publisher._tick().
 The existing ``agents/publishing.py`` mock is NOT touched.
 """
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any, Optional, TypedDict
 
@@ -40,6 +45,7 @@ from app.tools.publishing_tools import (
     publish_facebook_tool,
     publish_instagram_tool,
     publish_linkedin_tool,
+    publish_youtube_tool,
     update_status_tool,
 )
 
@@ -127,6 +133,8 @@ async def _publish_channel(state: PublishingState) -> dict:
     # Dispatch
     if channel == "linkedin":
         result = await publish_linkedin_tool(post, poster)
+    elif channel == "youtube":
+        result = await publish_youtube_tool(post)  # video-only — no poster payload
     elif channel == "instagram":
         result = await publish_instagram_tool(post, poster)
     elif channel == "facebook":
@@ -161,9 +169,13 @@ async def _publish_channel(state: PublishingState) -> dict:
 
 async def _update_status(state: PublishingState) -> dict:
     """
-    Flip status → 'published' (unconditional — per-channel failures already
-    logged, never block the final state transition).
-    Advance post_index and set done when all posts are processed.
+    Flip status → 'published' if at least one targeted channel actually
+    succeeded, else 'failed' (e.g. YouTube selected with no video attached —
+    a broken upload must never read as a successful publish). A post with no
+    targets at all (current_targets == []) still goes to 'published'
+    status-only, matching the pre-existing zero-connected-channels behaviour.
+    The per-channel outcome is persisted as channel_status (JSON) so the
+    Publishing queue can show why.
     """
     post      = state["current_post"]
     kind      = post["kind"]
@@ -172,11 +184,20 @@ async def _update_status(state: PublishingState) -> dict:
     day_date  = post.get("day_date") if kind == "campaign" else None
     now       = db.now_iso()
 
-    await update_status_tool(kind, group_id, tenant_id, "published", day_date, now)
+    per_channel = (state.get("post_results") or {}).get(group_id, {})
+    if not state["current_targets"]:
+        final_status, published_at, channel_status = "published", now, None
+    else:
+        succeeded = any(r.get("status") == "success" for r in per_channel.values())
+        final_status = "published" if succeeded else "failed"
+        published_at = now if succeeded else None
+        channel_status = json.dumps(per_channel)
+
+    await update_status_tool(kind, group_id, tenant_id, final_status, day_date, published_at, channel_status)
 
     new_index = state["post_index"] + 1
     done      = new_index >= len(state["due_posts"])
-    logger.info("[publish-agent] update_status: %s:%s → published (done=%s)", kind, group_id, done)
+    logger.info("[publish-agent] update_status: %s:%s → %s (done=%s)", kind, group_id, final_status, done)
     return {"post_index": new_index, "done": done}
 
 

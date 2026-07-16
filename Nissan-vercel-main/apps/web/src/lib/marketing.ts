@@ -22,6 +22,7 @@ import type {
   PublishResult,
   RecommendedCampaign,
   SelectedAsset,
+  YouTubeStatus,
 } from './types'
 import type { DuckAssetRow } from './analytics.duckdb'
 
@@ -447,13 +448,36 @@ export const getMarketingAnalytics = createServerFn({ method: 'GET' })
     }
   })
 
-// LinkedIn insights — REAL likes/comments per published post (socialActions),
-// proxied from FastAPI. reach/impressions/followers/page-views are null (the
-// member API doesn't expose them — org + Marketing Developer Platform only).
+// LinkedIn insights — read from stored snapshots (written by the background
+// analytics poller), proxied from FastAPI. Likes/comments/engagement work for
+// any connected account (member API). Reach/impressions/shares/engagement
+// rate/followers growth/profile views only populate once a Company Page is
+// connected AND the LinkedIn Developer App has Marketing Developer Platform
+// (MDP) access — until then `orgMetricsStatus`/`accountMetricsStatus` report
+// "mdp_required" (org connected, blocked) or "unavailable" (no org yet).
+export type LinkedInMetricsStatus = 'ok' | 'unavailable' | 'mdp_required' | 'error'
+
+export interface LinkedInPostInsight {
+  urn: string
+  title: string
+  caption: string | null
+  imageUrl: string | null
+  at: string | null
+  likes: number | null
+  comments: number | null
+  shares: number | null
+  impressions: number | null
+  reach: number | null
+  clicks: number | null
+  engagementRate: number | null
+  status: LinkedInMetricsStatus
+}
+
 export interface LinkedInInsights {
   connected: boolean
   handle: string | null
   last_sync: string | null
+  analyticsAccess: 'member' | 'organization'
   postsTracked: number
   postsWithStats: number
   likes: number
@@ -463,21 +487,27 @@ export interface LinkedInInsights {
   reach: number | null
   impressions: number | null
   shares: number | null
+  clicks: number | null
   engagementRate: number | null
   followersGrowth: number | null
   profileViews: number | null
-  topPosts: Array<{ urn: string; title: string; caption: string | null; likes: number; comments: number; at: string | null }>
-  posts: Array<{ urn: string; title: string; caption: string | null; likes: number; comments: number; at: string | null }>
+  orgMetricsStatus: LinkedInMetricsStatus
+  accountMetricsStatus: LinkedInMetricsStatus
+  topPosts: Array<LinkedInPostInsight>
+  posts: Array<LinkedInPostInsight>
 }
 
 export const getLinkedInInsights = createServerFn({ method: 'GET' })
   .validator((d: AnalyticsRange) => d)
   .handler(async ({ data }): Promise<LinkedInInsights> => {
     const empty: LinkedInInsights = {
-      connected: false, handle: null, last_sync: null, postsTracked: 0, postsWithStats: 0,
+      connected: false, handle: null, last_sync: null, analyticsAccess: 'member',
+      postsTracked: 0, postsWithStats: 0,
       likes: 0, comments: 0, engagement: 0, avgEngagementPerPost: 0,
-      reach: null, impressions: null, shares: null, engagementRate: null,
-      followersGrowth: null, profileViews: null, topPosts: [], posts: [],
+      reach: null, impressions: null, shares: null, clicks: null, engagementRate: null,
+      followersGrowth: null, profileViews: null,
+      orgMetricsStatus: 'unavailable', accountMetricsStatus: 'unavailable',
+      topPosts: [], posts: [],
     }
     try {
       const supabase = getSupabaseServerClient()
@@ -497,6 +527,115 @@ export const getLinkedInInsights = createServerFn({ method: 'GET' })
       return empty
     }
   })
+
+export interface LinkedInOrganization {
+  urn: string
+  name: string
+}
+
+// Instagram's like_count isn't reliably returned for every media type/API
+// version — "unavailable" covers that gracefully (comments still populate
+// independently). No 'mdp_required' here — not applicable to Instagram.
+export type InstagramMetricsStatus = 'ok' | 'unavailable' | 'expired_token' | 'rate_limited' | 'error'
+
+export interface InstagramPostInsight {
+  mediaId: string
+  caption: string | null
+  mediaType: string | null
+  imageUrl: string | null
+  permalink: string | null
+  at: string | null
+  likes: number | null
+  comments: number | null
+  status: InstagramMetricsStatus
+}
+
+export interface InstagramInsights {
+  connected: boolean
+  handle: string | null
+  last_sync: string | null
+  postsTracked: number
+  postsWithStats: number
+  likes: number
+  comments: number
+  engagement: number
+  avgEngagementPerPost: number
+  likesMetricsStatus: InstagramMetricsStatus
+  topPosts: Array<InstagramPostInsight>
+  posts: Array<InstagramPostInsight>
+}
+
+export const getInstagramInsights = createServerFn({ method: 'GET' })
+  .validator((d: AnalyticsRange) => d)
+  .handler(async ({ data }): Promise<InstagramInsights> => {
+    const empty: InstagramInsights = {
+      connected: false, handle: null, last_sync: null,
+      postsTracked: 0, postsWithStats: 0,
+      likes: 0, comments: 0, engagement: 0, avgEngagementPerPost: 0,
+      likesMetricsStatus: 'unavailable',
+      topPosts: [], posts: [],
+    }
+    try {
+      const supabase = getSupabaseServerClient()
+      const { tenantId } = await authCtx(supabase)
+      if (!tenantId) return empty
+      const { start, end } = resolveAnalyticsRange(data)
+      const qs = new URLSearchParams({
+        tenant_id: tenantId,
+        date_from: start.toISOString(),
+        date_to: end.toISOString(),
+      })
+      const res = await fetch(`${FASTAPI_URL}/api/instagram/insights?${qs.toString()}`)
+      if (!res.ok) return empty
+      return (await res.json()) as InstagramInsights
+    } catch (e) {
+      console.error('[getInstagramInsights] failed:', e)
+      return empty
+    }
+  })
+
+export const getLinkedInOrganizations = createServerFn({ method: 'GET' }).handler(
+  async (): Promise<{ status: string; organizations: Array<LinkedInOrganization> }> => {
+    try {
+      const supabase = getSupabaseServerClient()
+      const { tenantId } = await authCtx(supabase)
+      const res = await fetch(`${FASTAPI_URL}/api/linkedin/organizations?tenant_id=${tenantId}`)
+      if (!res.ok) return { status: 'error', organizations: [] }
+      return await res.json()
+    } catch (e) {
+      console.error('[getLinkedInOrganizations] failed:', e)
+      return { status: 'error', organizations: [] }
+    }
+  },
+)
+
+export const selectLinkedInOrganization = createServerFn({ method: 'POST' })
+  .validator((d: { orgUrn: string; orgName?: string }) => d)
+  .handler(async ({ data }): Promise<{ status: string }> => {
+    const supabase = getSupabaseServerClient()
+    const { tenantId } = await authCtx(supabase)
+    const res = await fetch(`${FASTAPI_URL}/api/linkedin/organizations/select`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tenant_id: tenantId, org_urn: data.orgUrn, org_name: data.orgName }),
+    })
+    if (!res.ok) throw new Error(`Failed to select organization: ${res.statusText}`)
+    return res.json()
+  })
+
+export const refreshLinkedInAnalytics = createServerFn({ method: 'POST' }).handler(
+  async (): Promise<{ status: string }> => {
+    const supabase = getSupabaseServerClient()
+    const { tenantId } = await authCtx(supabase)
+    const res = await fetch(`${FASTAPI_URL}/api/linkedin/analytics/refresh`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tenant_id: tenantId }),
+    })
+    if (!res.ok) throw new Error(`Refresh failed: ${res.statusText}`)
+    return res.json()
+  },
+)
 
 // getCampaigns: primary source is DuckDB (where Campaign Planner writes),
 // with live post counts cross-queried from Supabase campaign_posts.
@@ -635,6 +774,7 @@ export const getDuckCampaignDays = createServerFn({ method: 'GET' }).handler(
         offer: r.offer ?? undefined,
         content_status: (r.content_status as import('./types').ContentStatus) ?? 'pending',
         poster_url: r.poster_url ?? undefined,
+        video_url: r.video_url ?? undefined,
       }))
     } catch {
       return []
@@ -1126,6 +1266,9 @@ export const syncChannelConnection = createServerFn({ method: 'POST' })
   .handler(async ({ data }): Promise<{ status: string; last_sync: string }> => {
     const supabase = getSupabaseServerClient()
     const { tenantId } = await authCtx(supabase)
+    // YouTube has no separate /sync endpoint — the caller (channels.tsx) uses
+    // getYouTubeStatus() directly for that channel instead of this function,
+    // since Google tokens don't need a manual resync trigger the way LinkedIn's does.
     const endpoint = data.channel === 'linkedin'
       ? `${FASTAPI_URL}/api/linkedin/sync`
       : `${FASTAPI_URL}/api/instagram/sync`
@@ -1190,6 +1333,115 @@ export const disconnectLinkedIn = createServerFn({ method: 'POST' }).handler(
   },
 )
 
+// ── YouTube (Google OAuth + Data API v3) ──────────────────────────────────
+
+export const getYouTubeConnectUrl = createServerFn({ method: 'GET' }).handler(
+  async (): Promise<string> => {
+    const supabase = getSupabaseServerClient()
+    const { tenantId } = await authCtx(supabase)
+    return `${FASTAPI_URL}/api/youtube/connect?tenant_id=${tenantId}`
+  },
+)
+
+export const getYouTubeStatus = createServerFn({ method: 'GET' }).handler(
+  async (): Promise<YouTubeStatus> => {
+    const empty: YouTubeStatus = { connected: false, handle: null, last_sync: null, channel_id: null, channel_name: null }
+    try {
+      const supabase = getSupabaseServerClient()
+      const { tenantId } = await authCtx(supabase)
+      const response = await fetch(`${FASTAPI_URL}/api/youtube/status?tenant_id=${tenantId}`)
+      if (!response.ok) return empty
+      return (await response.json()) as YouTubeStatus
+    } catch (e) {
+      console.error('[getYouTubeStatus] Error (is the API on :8000?):', e)
+      return empty
+    }
+  },
+)
+
+export const disconnectYouTube = createServerFn({ method: 'POST' }).handler(
+  async (): Promise<{ status: string; message: string }> => {
+    try {
+      const supabase = getSupabaseServerClient()
+      const { tenantId } = await authCtx(supabase)
+      const response = await fetch(`${FASTAPI_URL}/api/youtube/disconnect`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tenant_id: tenantId }),
+      })
+      if (!response.ok) {
+        throw new Error(`Disconnect failed: ${response.statusText}`)
+      }
+      return response.json() as Promise<{ status: string; message: string }>
+    } catch (e) {
+      throw new Error(`Failed to disconnect YouTube: ${e instanceof Error ? e.message : String(e)}`)
+    }
+  },
+)
+
+export const getFacebookConnectUrl = createServerFn({ method: 'GET' }).handler(
+  async (): Promise<string> => {
+    const supabase = getSupabaseServerClient()
+    const { tenantId } = await authCtx(supabase)
+    return `${FASTAPI_URL}/api/facebook/connect?tenant_id=${tenantId}`
+  },
+)
+
+export const disconnectFacebook = createServerFn({ method: 'POST' }).handler(
+  async (): Promise<{ status: string; message: string }> => {
+    try {
+      const supabase = getSupabaseServerClient()
+      const { tenantId } = await authCtx(supabase)
+      const response = await fetch(`${FASTAPI_URL}/api/facebook/disconnect`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tenant_id: tenantId }),
+      })
+      if (!response.ok) {
+        throw new Error(`Disconnect failed: ${response.statusText}`)
+      }
+      return response.json() as Promise<{ status: string; message: string }>
+    } catch (e) {
+      throw new Error(`Failed to disconnect Facebook: ${e instanceof Error ? e.message : String(e)}`)
+    }
+  },
+)
+
+// The server-side tenant context (authCtx) isn't reachable from a plain browser
+// fetch, and YouTube's video upload needs a direct browser → FastAPI multipart
+// request (same reasoning as uploadCallRecording in lib/calls.ts — streams the
+// file straight through instead of buffering it in a Node server function).
+// This exposes the caller's tenantId once so the client can supply it.
+export const getCurrentTenantId = createServerFn({ method: 'GET' }).handler(
+  async (): Promise<string | null> => {
+    const supabase = getSupabaseServerClient()
+    const { tenantId } = await authCtx(supabase)
+    return tenantId ?? null
+  },
+)
+
+// Direct browser → FastAPI multipart upload (CORS allows :3000, same pattern as
+// uploadCallRecording). Returns the published video's id + URL.
+export async function publishYouTubeVideo(
+  tenantId: string,
+  file: File,
+  fields: { title: string; description?: string; tags?: string; privacy_status?: string },
+): Promise<{ status: string; video_id?: string; video_url?: string; error?: string }> {
+  const form = new FormData()
+  form.append('tenant_id', tenantId)
+  form.append('title', fields.title)
+  form.append('description', fields.description ?? '')
+  form.append('tags', fields.tags ?? '')
+  form.append('privacy_status', fields.privacy_status ?? 'private')
+  form.append('video', file)
+  const res = await fetch(`${FASTAPI_URL}/api/youtube/publish`, { method: 'POST', body: form })
+  if (!res.ok) {
+    const err = (await res.json().catch(() => ({}))) as { detail?: string }
+    throw new Error(err.detail ?? `Publish failed: ${res.status}`)
+  }
+  return res.json() as Promise<{ status: string; video_id?: string; video_url?: string; error?: string }>
+}
+
 /**
  * Publish a creative to every connected channel (LinkedIn real; IG/FB graceful).
  * Returns a per-platform status map. One platform's failure does not block others.
@@ -1202,6 +1454,8 @@ export const publishToConnectedChannels = createServerFn({ method: 'POST' })
     title?: string
     description?: string
     platforms?: Array<string>
+    video_url?: string
+    privacy_status?: string
   }) => d)
   .handler(async ({ data }): Promise<PublishResult> => {
     const supabase = getSupabaseServerClient()
@@ -1264,6 +1518,9 @@ export const publishGroupToConnected = createServerFn({ method: 'POST' })
       // them inline as base64; backend-hosted http(s) URLs go through image_url.
       if (poster?.startsWith('data:')) body['image_base64'] = poster
       else if (poster) body['image_url'] = poster
+      // YouTube's videos.insert needs an actual file — resolved server-side
+      // from this URL (see app/routers/publish.py's _local_video_path).
+      if (p.video_url) body['video_url'] = p.video_url
 
       try {
         const res = await fetch(`${FASTAPI_URL}/api/publish`, {
@@ -1525,6 +1782,7 @@ export const getMonthEvents = createServerFn({ method: 'GET' })
           cta: r.cta ?? undefined,
           content_status: (r.content_status as ContentStatus) ?? 'pending',
           poster_url: r.poster_url ?? undefined,
+          video_url: r.video_url ?? undefined,
         })),
       }
     } catch (e) {
@@ -1572,6 +1830,47 @@ export const saveEventContent = createServerFn({ method: 'POST' })
       hashtags: data.hashtags, cta: data.cta, content_status: data.content_status ?? 'edited',
       selected_channels: data.selected_channels,
     })
+    return { ok: true }
+  })
+
+// Direct browser → FastAPI multipart upload (same pattern as publishYouTubeVideo /
+// uploadCallRecording — video files are too large to round-trip as base64 JSON).
+// Returns the served /videos/... path; caller prefixes FASTAPI_URL to get an
+// absolute URL before persisting it as video_url via saveContentVideoUrl.
+export async function uploadContentVideo(
+  tenantId: string,
+  file: File,
+): Promise<{ video_url: string }> {
+  const form = new FormData()
+  form.append('tenant_id', tenantId)
+  form.append('video', file)
+  const res = await fetch(`${FASTAPI_URL}/marketing/video/upload`, { method: 'POST', body: form })
+  if (!res.ok) {
+    const err = (await res.json().catch(() => ({}))) as { detail?: string }
+    throw new Error(err.detail ?? `Video upload failed: ${res.status}`)
+  }
+  const json = (await res.json()) as { video_url: string }
+  return { video_url: `${FASTAPI_URL}${json.video_url}` }
+}
+
+// Persist (or clear) a Content Studio video attachment. Kept separate from
+// saveDayContent/saveEventContent because it's written the moment upload
+// finishes, independent of the headline/caption edit-and-save cycle.
+export const saveContentVideoUrl = createServerFn({ method: 'POST' })
+  .validator((d: {
+    kind: 'day' | 'event'
+    campaign_id?: string; day_date?: string; event_id?: string
+    video_url: string | null
+  }) => d)
+  .handler(async ({ data }): Promise<{ ok: true }> => {
+    const supabase = getSupabaseServerClient()
+    const { tenantId } = await authCtx(supabase)
+    const { updateDayContent, updateOpportunityContent } = await import('./analytics.duckdb')
+    if (data.kind === 'day' && data.campaign_id && data.day_date) {
+      await updateDayContent(data.campaign_id, tenantId, data.day_date, { video_url: data.video_url })
+    } else if (data.kind === 'event' && data.event_id) {
+      await updateOpportunityContent(data.event_id, tenantId, { video_url: data.video_url })
+    }
     return { ok: true }
   })
 

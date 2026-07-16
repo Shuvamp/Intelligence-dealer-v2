@@ -53,11 +53,24 @@ def _merge_prose(plan: dict, prose: dict) -> None:
         if task["task_name"] in impacts:
             task["expected_impact"] = impacts[task["task_name"]]
 
-    if prose.get("recommendations"):
-        plan["recommendations"] = prose["recommendations"]
+    # recommendations are NOT merged here — they're categorized deterministically
+    # (best_channel/optimization/growth/risk/tip) by budget.py._recommendations()
+    # so the dashboard can always render exactly one card per category; Groq
+    # freeform text would lose that structure.
 
 
-async def plan_budget(tenant_id: str, context_id: str, user_budget: int) -> dict:
+async def plan_budget(
+    tenant_id: str,
+    context_id: str,
+    user_budget: int,
+    objective: str | None = None,
+    campaign_duration_days: int | None = None,
+    target_audience: str | None = None,
+    vehicle_category: str | None = None,
+    preferred_channels: list[str] | None = None,
+    region: str | None = None,
+    skip_llm: bool = False,
+) -> dict:
     context = await _data.get_context(context_id, tenant_id)
     if not context:
         raise ContextNotFound(f"context {context_id} not found")
@@ -76,16 +89,23 @@ async def plan_budget(tenant_id: str, context_id: str, user_budget: int) -> dict
     aeo = overall.get("aeo_score")
     category = (summary or {}).get("industry") or context.get("industry")
 
-    # Category baselines live in the DB (migration 0036); None falls back to the
-    # hardcoded defaults in budget.py.
-    benchmarks = await _data.get_category_benchmarks()
-    recommended = budget.derive_recommended(seo, aeo, category, benchmarks)
-    payload = llm.build_input(context, summary, report, recommended, user_budget)
+    recommended = budget.derive_recommended(seo, aeo, category)
+    payload = llm.build_input(
+        context, summary, report, recommended, user_budget,
+        objective=objective,
+        campaign_duration_days=campaign_duration_days,
+        target_audience=target_audience,
+        vehicle_category=vehicle_category,
+        preferred_channels=preferred_channels,
+        region_override=region,
+    )
 
     plan = budget.build_plan(payload)  # deterministic — owns every number
 
     engine = "deterministic"
-    if llm.has_groq():
+    # skip_llm: used by What-If scenario comparisons — several budget amounts
+    # compared side by side need only the numbers, not fresh prose each time.
+    if llm.has_groq() and not skip_llm:
         try:
             prose = llm.generate_prose(payload, plan)
         except Exception:  # noqa: BLE001
@@ -107,5 +127,6 @@ async def plan_budget(tenant_id: str, context_id: str, user_budget: int) -> dict
         "comparison_table": plan["comparison_table"],
         "execution_plan": plan["execution_plan"],
         "recommendations": plan["recommendations"],
+        "business_impact": plan["business_impact"],
         "errors": [],
     }

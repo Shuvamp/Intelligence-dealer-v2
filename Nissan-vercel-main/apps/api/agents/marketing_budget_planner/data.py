@@ -65,33 +65,6 @@ class BudgetPlannerData:
         row["services"] = _maybe_json(row.get("services")) or []
         return row
 
-    async def get_category_benchmarks(self) -> list[tuple[str, int]] | None:
-        """Category → baseline-spend table (migration 0036), ordered by precedence
-        (most specific key first). Global reference data, so no tenant filter.
-        Returns None on any failure/empty result so the caller falls back to the
-        hardcoded defaults in budget.py — benchmarks must never break planning."""
-        try:
-            async with httpx.AsyncClient(base_url=SUPABASE_URL, timeout=15) as c:
-                r = await c.get(
-                    "/rest/v1/marketing_budget_benchmarks",
-                    params={"select": "category_key,base_inr", "order": "sort_order.asc"},
-                    headers=_headers(),
-                )
-                r.raise_for_status()
-                rows = r.json()
-        except Exception:  # noqa: BLE001
-            return None
-        out: list[tuple[str, int]] = []
-        for row in rows or []:
-            key = (row.get("category_key") or "").strip().lower()
-            try:
-                base = int(row.get("base_inr"))
-            except (TypeError, ValueError):
-                continue
-            if key and base > 0:
-                out.append((key, base))
-        return out or None
-
     async def get_latest_report(self, context_id: str, tenant_id: str) -> dict | None:
         async with httpx.AsyncClient(base_url=SUPABASE_URL, timeout=15) as c:
             r = await c.get(

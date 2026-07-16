@@ -21,6 +21,13 @@ class PlanRequest(BaseModel):
     tenant_id: str
     context_id: str
     user_budget: int
+    objective: str | None = None                    # lead_generation | vehicle_sales | brand_awareness | website_traffic | customer_engagement
+    campaign_duration_days: int | None = None
+    target_audience: str | None = None
+    vehicle_category: str | None = None
+    preferred_channels: list[str] | None = None
+    region: str | None = None                        # overrides the analyzed website's region for this plan
+    skip_llm: bool = False                           # true for What-If scenario comparisons — numbers only, no Groq call
 
 
 class BudgetSummary(BaseModel):
@@ -70,8 +77,33 @@ class ExecutionTask(BaseModel):
 
 
 class RecommendationNote(BaseModel):
+    category: str  # best_channel | optimization | growth | risk | tip
     title: str
     detail: str
+
+
+class BusinessImpact(BaseModel):
+    expected_leads: int
+    expected_leads_display: str
+    website_traffic: int
+    website_traffic_display: str
+    test_drive_bookings: int
+    test_drive_bookings_display: str
+    customer_enquiries: int
+    customer_enquiries_display: str
+    vehicle_sales: int
+    vehicle_sales_display: str
+    estimated_roi_pct: int
+    estimated_roi_display: str
+    reach: int
+    reach_display: str
+    impressions: int
+    impressions_display: str
+
+
+class BusinessImpactBlock(BaseModel):
+    recommended: BusinessImpact
+    optimized: BusinessImpact
 
 
 class PlanResponse(BaseModel):
@@ -87,6 +119,7 @@ class PlanResponse(BaseModel):
     comparison_table: list[ComparisonRow] = []
     execution_plan: list[ExecutionTask] = []
     recommendations: list[RecommendationNote] = []
+    business_impact: BusinessImpactBlock | None = None
     errors: list[str] = []
 
 
@@ -95,7 +128,16 @@ async def plan_endpoint(body: PlanRequest) -> PlanResponse:
     if body.user_budget < 0:
         raise HTTPException(status_code=422, detail="user_budget must be non-negative")
     try:
-        result = await plan_budget(body.tenant_id, body.context_id, body.user_budget)
+        result = await plan_budget(
+            body.tenant_id, body.context_id, body.user_budget,
+            objective=body.objective,
+            campaign_duration_days=body.campaign_duration_days,
+            target_audience=body.target_audience,
+            vehicle_category=body.vehicle_category,
+            preferred_channels=body.preferred_channels,
+            region=body.region,
+            skip_llm=body.skip_llm,
+        )
     except ContextNotFound as e:
         raise HTTPException(status_code=404, detail=str(e))
     return PlanResponse(**result)

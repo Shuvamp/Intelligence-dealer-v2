@@ -65,8 +65,6 @@ class PageInfo(BaseModel):
     url: str
     title: Optional[str] = None
     type: PageType = "other"
-    text_excerpt: Optional[str] = None
-    headings: list[str] = Field(default_factory=list)
 
 
 class ImageInfo(BaseModel):
@@ -126,22 +124,6 @@ class TrustInfo(BaseModel):
     testimonials_count: int = 0
 
 
-class LinkEntry(BaseModel):
-    href: str
-    text: Optional[str] = None
-    source_page: Optional[str] = None
-
-
-class LinksInfo(BaseModel):
-    """internal_count/external_count are true unique-href totals; the
-    internal/external lists are capped samples (see link_graph_node) purely
-    to bound storage/token size, not the real count."""
-    internal_count: int = 0
-    external_count: int = 0
-    internal: list[LinkEntry] = Field(default_factory=list)
-    external: list[LinkEntry] = Field(default_factory=list)
-
-
 class WebsiteExtractionResult(BaseModel):
     """The ONE normalized JSON — the agent's entire literal deliverable."""
     website: WebsiteInfo
@@ -157,4 +139,3 @@ class WebsiteExtractionResult(BaseModel):
     technology: TechnologyInfo = Field(default_factory=TechnologyInfo)
     technical_seo: TechnicalSeoInfo = Field(default_factory=TechnicalSeoInfo)
     trust: TrustInfo = Field(default_factory=TrustInfo)
-    links: LinksInfo = Field(default_factory=LinksInfo)
