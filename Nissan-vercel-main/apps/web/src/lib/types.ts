@@ -482,6 +482,43 @@ export interface IntelRecommendation {
   priority: 'high' | 'medium' | 'low'
 }
 
+export interface ChannelAnalytic {
+  channel: PostChannel
+  postCount: number
+  publishedCount: number
+  pendingCount: number
+  approvedCompliance: number
+  flaggedCompliance: number
+  campaignCount: number
+  reach: number
+  leads: number
+  avgCpl: number
+}
+
+export interface CampaignHealth {
+  totalPosts: number
+  published: number
+  pendingApproval: number
+  draft: number
+  rejected: number
+  compliancePassRate: number
+  activeCampaigns: number
+  totalCampaigns: number
+}
+
+export interface VelocityWeek {
+  weekLabel: string
+  count: number
+  hot: number
+}
+
+export interface LostLeadInsight {
+  count: number
+  topVehicle: string
+  topSource: string
+  avgBudget: number
+}
+
 // ---- Executive Copilot module ----
 
 export type CopilotRole = 'user' | 'assistant'
