@@ -35,6 +35,17 @@ const FASTAPI_URL = (() => {
   return /^https?:\/\//.test(raw) ? raw : `https://${raw}`
 })()
 
+// Base URL baked into PERSISTED poster URLs only (Instagram's Graph API fetches
+// the image server-side, so this must be publicly reachable — unlike FASTAPI_URL
+// above, which is fine as localhost since those calls run server-to-server on
+// this machine). Falls back to FASTAPI_URL when unset.
+const POSTER_PUBLIC_URL = (() => {
+  const raw = typeof process !== 'undefined' && process.env['POSTER_PUBLIC_URL']
+  if (!raw) return FASTAPI_URL
+  const trimmed = raw.replace(/\/$/, '')
+  return /^https?:\/\//.test(trimmed) ? trimmed : `https://${trimmed}`
+})()
+
 const DEFAULT_CHANNELS = ['Instagram', 'Facebook', 'X']
 
 type BatchItemIn = { idx: number; date?: string; theme?: string; vehicle?: string | null; offer?: string | null }
@@ -1874,6 +1885,56 @@ export const saveContentVideoUrl = createServerFn({ method: 'POST' })
     return { ok: true }
   })
 
+// Upload a poster image from the user's device — fallback for when Gemini is
+// over quota. Saved into the backend /posters folder (publicly reachable via
+// tunnel, like generated posters) so Instagram can fetch it. Mirrors
+// uploadContentVideo; returns the served path, persisted via saveContentPosterUrl.
+export async function uploadContentPoster(
+  file: File,
+  routing: {
+    kind: 'day' | 'event'
+    campaign_id?: string; day_date?: string; day_num?: number; event_id?: string
+    theme?: string; title?: string
+  },
+): Promise<{ path: string }> {
+  const form = new FormData()
+  form.append('file', file)
+  form.append('kind', routing.kind === 'day' ? 'campaign' : 'event')
+  if (routing.campaign_id) form.append('campaign_id', routing.campaign_id)
+  if (routing.event_id) form.append('event_id', routing.event_id)
+  if (routing.day_num != null) form.append('day_num', String(routing.day_num))
+  if (routing.day_date) form.append('day_date', routing.day_date)
+  if (routing.theme) form.append('theme', routing.theme)
+  if (routing.title) form.append('title', routing.title)
+  const res = await fetch(`${FASTAPI_URL}/marketing/poster/upload`, { method: 'POST', body: form })
+  if (!res.ok) {
+    const err = (await res.json().catch(() => ({}))) as { detail?: string }
+    throw new Error(err.detail ?? `Poster upload failed: ${res.status}`)
+  }
+  return (await res.json()) as { path: string }
+}
+
+// Persist an uploaded poster's path as poster_url with the public tunnel prefix
+// (same POSTER_PUBLIC_URL generated posters use, so Instagram can fetch it).
+export const saveContentPosterUrl = createServerFn({ method: 'POST' })
+  .validator((d: {
+    kind: 'day' | 'event'
+    campaign_id?: string; day_date?: string; event_id?: string
+    path: string
+  }) => d)
+  .handler(async ({ data }): Promise<{ ok: true; url: string }> => {
+    const supabase = getSupabaseServerClient()
+    const { tenantId } = await authCtx(supabase)
+    const url = `${POSTER_PUBLIC_URL}${data.path}?v=${Date.now()}`
+    const { updateDayContent, updateOpportunityContent } = await import('./analytics.duckdb')
+    if (data.kind === 'day' && data.campaign_id && data.day_date) {
+      await updateDayContent(data.campaign_id, tenantId, data.day_date, { poster_url: url })
+    } else if (data.kind === 'event' && data.event_id) {
+      await updateOpportunityContent(data.event_id, tenantId, { poster_url: url })
+    }
+    return { ok: true, url }
+  })
+
 export const suggestField = createServerFn({ method: 'POST' })
   .validator((d: {
     field: string; vehicle?: string; theme?: string
@@ -2053,7 +2114,7 @@ export const generatePosterImage = createServerFn({ method: 'POST' })
 
     // Absolute backend URL (served by FastAPI /posters) — persisted on the row.
     // ?v= busts the browser cache when a refine overwrites the same file.
-    const posterUrl = json.path ? `${FASTAPI_URL}${json.path}?v=${Date.now()}` : ''
+    const posterUrl = json.path ? `${POSTER_PUBLIC_URL}${json.path}?v=${Date.now()}` : ''
     if (posterUrl) {
       try {
         const { updateDayContent, updateOpportunityContent } = await import('./analytics.duckdb')

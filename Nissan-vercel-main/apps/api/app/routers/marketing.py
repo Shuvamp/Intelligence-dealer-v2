@@ -19,6 +19,8 @@ POSTERS_DIR = Path(__file__).resolve().parent.parent.parent / "generated" / "pos
 VIDEOS_DIR = Path(__file__).resolve().parent.parent.parent / "generated" / "videos"
 _ALLOWED_VIDEO_EXT = {".mp4", ".mov", ".webm", ".avi", ".mkv"}
 _MAX_VIDEO_BYTES = 500 * 1024 * 1024  # 500MB — generous for a dealer-made promo clip
+_ALLOWED_IMAGE_EXT = {".png", ".jpg", ".jpeg"}  # jpg/png only — Instagram-safe
+_MAX_IMAGE_BYTES = 20 * 1024 * 1024  # 20MB
 from app.gemini import gemini_image, has_gemini_key
 from app.llm import llm_json, has_llm
 from app.agents.content_generation import content_agent, generate_batch, suggest_field
@@ -524,6 +526,55 @@ async def video_upload(tenant_id: str = Form(...), video: UploadFile = File(...)
     video_url = f"/videos/{_safe(tenant_id)}/{fname}"
     logger.info("[video:upload] tenant=%s saved → %s (%d bytes)", tenant_id, video_url, len(contents))
     return VideoUploadResponse(video_url=video_url)
+
+
+# ── Content Studio poster upload (fallback when Gemini is over quota — the user
+# supplies their own poster image, still published like a generated one) ───────
+
+class PosterUploadResponse(BaseModel):
+    path: str   # served path, e.g. /posters/campaigns/<id>/day01_<date>.png
+
+
+@router.post("/poster/upload", response_model=PosterUploadResponse)
+async def poster_upload(
+    file: UploadFile = File(...),
+    kind: str = Form("campaign"),
+    campaign_id: Optional[str] = Form(None),
+    event_id: Optional[str] = Form(None),
+    day_num: Optional[int] = Form(None),
+    day_date: Optional[str] = Form(None),
+    theme: str = Form(""),
+    title: str = Form(""),
+):
+    """Save a user-uploaded poster under the same structured /posters folder as
+    generated posters (served by main.py, publicly reachable via tunnel) so it
+    can be published when Gemini is unavailable. Returns the served path, which
+    the web app persists as poster_url via saveContentPosterUrl."""
+    ext = Path(file.filename or "").suffix.lower()
+    if ext not in _ALLOWED_IMAGE_EXT:
+        raise HTTPException(status_code=400, detail=f"Unsupported image format '{ext}'. Allowed: {sorted(_ALLOWED_IMAGE_EXT)}")
+    contents = await file.read()
+    if not contents:
+        raise HTTPException(status_code=400, detail="Empty file")
+    if len(contents) > _MAX_IMAGE_BYTES:
+        raise HTTPException(status_code=413, detail=f"File exceeds {_MAX_IMAGE_BYTES // (1024 * 1024)} MB limit")
+
+    req = BannerRequest(
+        kind=kind, campaign_id=campaign_id, event_id=event_id,
+        day_num=day_num, day_date=day_date, theme=theme, title=title,
+    )
+    # Drop any prior poster (jpg+png) at this stem so display/publish use the upload.
+    existing = _find_existing_poster(req)
+    if existing:
+        try:
+            existing.unlink()
+        except Exception as exc:
+            logger.warning("[poster:upload] could not remove old poster (%s)", exc)
+
+    save_ext = "jpg" if ext in (".jpg", ".jpeg") else ext.lstrip(".")
+    path = _save_poster(req, contents, save_ext)
+    logger.info("[poster:upload] kind=%s saved → %s (%d bytes)", kind, path, len(contents))
+    return PosterUploadResponse(path=path)
 
 
 # ── Marketing Copilot (Agent 8) ───────────────────────────────────────────────

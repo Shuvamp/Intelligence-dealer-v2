@@ -5,10 +5,11 @@ import {
   saveDayContent, saveEventContent, generateDayContent, generateEventContent, suggestField,
   approveCampaign, approveEvent, generatePosterImage, getChannelStatus,
   getCurrentTenantId, uploadContentVideo, saveContentVideoUrl,
+  uploadContentPoster, saveContentPosterUrl,
 } from '#/lib/marketing'
 import {
   Zap, RefreshCw, Hash, Image as ImageIcon, ChevronDown, ChevronLeft, ChevronRight, Car, Download, Calendar,
-  AlertCircle, Loader2, Sparkles, Save, CheckCircle2, X as XIcon, Plus, Link2, Check,
+  AlertCircle, Loader2, Sparkles, Save, CheckCircle2, X as XIcon, Plus, Link2, Check, Upload,
 } from 'lucide-react'
 import type {
   PostChannel, CampaignSummary, CampaignDay, MediaAsset, MonthOpportunity, ContentStatus,
@@ -394,10 +395,12 @@ function ContentStudio() {
   })
   const [videoUploading, setVideoUploading] = useState<Set<string>>(new Set())
   const [videoError, setVideoError] = useState<string | null>(null)
+  const [posterUploading, setPosterUploading] = useState<Set<string>>(new Set())
 
   // Derived for the currently selected item.
   const currentPosterUrl = posterCache[selectedKey ?? ''] ?? null
   const currentPosterLoading = selectedKey ? generatingKeys.has(selectedKey) : false
+  const currentPosterUploading = selectedKey ? posterUploading.has(selectedKey) : false
   const currentVideoUrl = videoCache[selectedKey ?? ''] ?? null
   const currentVideoUploading = selectedKey ? videoUploading.has(selectedKey) : false
 
@@ -670,6 +673,47 @@ function ContentStudio() {
     } finally {
       generatingKeysRef.current.delete(key)
       setGeneratingKeys(prev => { const n = new Set(prev); n.delete(key); return n })
+    }
+  }
+
+  // Upload a poster from the user's device — fallback when Gemini is over quota.
+  // Goes to the backend /posters folder, then persists as poster_url (public URL)
+  // so it displays here and publishes to Instagram like a generated poster.
+  const handleUploadPoster = async (file: File) => {
+    if (!selectedItem) return
+    if (!file.type.startsWith('image/')) {
+      setError('Please choose an image file (jpg or png).')
+      return
+    }
+    const key = selectedItem.key
+    setError(null)
+    setPosterUploading(prev => new Set([...prev, key]))
+    try {
+      const { path } = await uploadContentPoster(file, {
+        kind: selectedItem.kind,
+        campaign_id: selectedItem.campaign_id,
+        day_date: selectedItem.kind === 'day' ? selectedItem.date : undefined,
+        day_num: selectedItem.kind === 'day' ? selectedItem.day_num : undefined,
+        event_id: selectedItem.event_id,
+        theme: selectedItem.theme,
+        title: selectedItem.kind === 'day' ? (selectedCampaign?.name ?? '') : selectedItem.label,
+      })
+      const { url } = await saveContentPosterUrl({
+        data: {
+          kind: selectedItem.kind,
+          campaign_id: selectedItem.campaign_id,
+          day_date: selectedItem.kind === 'day' ? selectedItem.date : undefined,
+          event_id: selectedItem.event_id,
+          path,
+        },
+      })
+      posterCacheRef.current[key] = url
+      setPosterCache(prev => ({ ...prev, [key]: url }))
+      await router.invalidate()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Poster upload failed')
+    } finally {
+      setPosterUploading(prev => { const n = new Set(prev); n.delete(key); return n })
     }
   }
 
@@ -1521,21 +1565,39 @@ function ContentStudio() {
                           : 'Generating AI poster — or click Regenerate to refresh'}
                     </p>
                   </div>
-                  <button
-                    onClick={handleGeneratePoster}
-                    disabled={currentPosterLoading}
-                    className="flex items-center gap-1.5 rounded-[8px] bg-[#C3002F] px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-[#a50027] disabled:opacity-60 transition"
-                  >
-                    {currentPosterLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3 w-3" />}
-                    {currentPosterLoading ? 'Designing…' : 'Regenerate AI Poster'}
-                  </button>
+                  <div className="flex items-center gap-2">
+                    {/* Upload own poster — fallback for when Gemini is over quota */}
+                    <label
+                      className={cn(
+                        'flex items-center gap-1.5 rounded-[8px] border border-border px-3 py-1.5 text-[11px] font-semibold text-foreground hover:border-[#C3002F]/40 hover:text-[#C3002F] transition cursor-pointer',
+                        (currentPosterLoading || currentPosterUploading) && 'opacity-60 pointer-events-none',
+                      )}
+                    >
+                      {currentPosterUploading ? <Loader2 className="h-3 w-3 animate-spin" /> : <Upload className="h-3 w-3" />}
+                      {currentPosterUploading ? 'Uploading…' : 'Upload Poster'}
+                      <input
+                        type="file"
+                        accept="image/png,image/jpeg"
+                        className="hidden"
+                        onChange={(e) => { const f = e.target.files?.[0]; if (f) handleUploadPoster(f); e.target.value = '' }}
+                      />
+                    </label>
+                    <button
+                      onClick={handleGeneratePoster}
+                      disabled={currentPosterLoading || currentPosterUploading}
+                      className="flex items-center gap-1.5 rounded-[8px] bg-[#C3002F] px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-[#a50027] disabled:opacity-60 transition"
+                    >
+                      {currentPosterLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3 w-3" />}
+                      {currentPosterLoading ? 'Designing…' : 'Regenerate AI Poster'}
+                    </button>
+                  </div>
                 </div>
 
-                {currentPosterLoading ? (
+                {currentPosterLoading || currentPosterUploading ? (
                   <div className="w-full max-w-[420px] rounded-[16px] bg-[#1A1A1A] flex flex-col items-center justify-center gap-3" style={{ aspectRatio: '3/4' }}>
                     <Loader2 className="h-8 w-8 text-white/40 animate-spin" />
-                    <p className="text-[12px] text-white/60">Designing poster with Gemini…</p>
-                    <p className="text-[10px] text-white/35">Compositing your car onto a themed scene (~20s)</p>
+                    <p className="text-[12px] text-white/60">{currentPosterUploading ? 'Uploading your poster…' : 'Designing poster with Gemini…'}</p>
+                    {!currentPosterUploading && <p className="text-[10px] text-white/35">Compositing your car onto a themed scene (~20s)</p>}
                   </div>
                 ) : currentPosterUrl ? (
                   <div className="w-full max-w-[420px] space-y-2.5">
