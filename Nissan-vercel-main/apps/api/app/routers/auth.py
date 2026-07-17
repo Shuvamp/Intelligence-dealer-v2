@@ -217,7 +217,7 @@ async def instagram_callback(
 
         # ── Persist connection to local store ─────────────────────────────
         try:
-            channel_store.upsert(
+            await channel_store.upsert(
                 tenant_id, "instagram",
                 handle=handle or None,
                 instagram_id=ig_id,
@@ -369,7 +369,7 @@ async def linkedin_callback(
 
         # 4. Persist connection to local store
         try:
-            channel_store.upsert(
+            await channel_store.upsert(
                 tenant_id, "linkedin",
                 handle=handle or None,
                 linkedin_id=linkedin_id or None,

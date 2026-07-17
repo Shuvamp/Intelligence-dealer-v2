@@ -24,7 +24,6 @@ import type {
   SelectedAsset,
   YouTubeStatus,
 } from './types'
-import type { DuckAssetRow } from './analytics.duckdb'
 
 const FASTAPI_URL = (() => {
   const raw = (
@@ -1056,18 +1055,26 @@ export const getPublishedLog = createServerFn({ method: 'GET' }).handler(
 )
 
 // =====================================================================
-// Media Library — DuckDB-backed (marketing_assets table)
+// Media Library — Supabase Postgres (marketing_assets table + Storage)
 // =====================================================================
 import type { ChannelConnection, LinkedInProfileResult } from './types'
 
-function duckAssetToMediaAsset(r: DuckAssetRow): MediaAsset {
-  return {
-    id: r.id, tenant_id: r.tenant_id, name: r.name,
-    asset_type: r.asset_type, vehicle: r.vehicle ?? null,
-    sub_category: r.sub_category ?? null, file_url: r.file_url,
-    file_size: r.file_size ?? null, metadata: r.metadata ?? null,
-    created_at: typeof r.created_at === 'string' ? r.created_at : String(r.created_at),
-  }
+async function queryAssets(
+  supabase: ReturnType<typeof getSupabaseServerClient>,
+  tenantId: string,
+  filters: { asset_type?: string; vehicle?: string; search?: string },
+): Promise<Array<MediaAsset>> {
+  let query = supabase
+    .from('marketing_assets')
+    .select('*')
+    .eq('tenant_id', tenantId)
+    .order('created_at', { ascending: false })
+  if (filters.asset_type) query = query.eq('asset_type', filters.asset_type)
+  if (filters.vehicle) query = query.eq('vehicle', filters.vehicle)
+  if (filters.search) query = query.ilike('name', `%${filters.search}%`)
+  const { data, error } = await query
+  if (error) throw new Error(`Failed to list assets: ${error.message}`)
+  return (data ?? []) as Array<MediaAsset>
 }
 
 export const getMediaAssets = createServerFn({ method: 'GET' })
@@ -1075,9 +1082,7 @@ export const getMediaAssets = createServerFn({ method: 'GET' })
   .handler(async ({ data }): Promise<Array<MediaAsset>> => {
     const supabase = getSupabaseServerClient()
     const { tenantId } = await authCtx(supabase)
-    const { listAssets } = await import('./analytics.duckdb')
-    const rows = await listAssets(tenantId, data as { asset_type?: string; vehicle?: string; search?: string })
-    return rows.map(duckAssetToMediaAsset)
+    return queryAssets(supabase, tenantId, data)
   })
 
 export const uploadAsset = createServerFn({ method: 'POST' })
@@ -1093,46 +1098,31 @@ export const uploadAsset = createServerFn({ method: 'POST' })
     const ext = (data.filename.split('.').pop() ?? 'jpg').toLowerCase()
     const bytes = Buffer.from(data.file_b64, 'base64')
 
-    // Local dev runs against the DuckDB shim, which has no Storage API — write to
-    // disk (writable locally). Real Supabase → Storage bucket (Vercel's FS is
-    // read-only, so disk writes there fail with ENOENT).
-    const sbUrl = (import.meta.env.VITE_SUPABASE_URL as string | undefined) ?? ''
-    const isLocalShim = /localhost|127\.0\.0\.1/.test(sbUrl)
+    const objectPath = `${tenantId}/${randomUUID()}.${ext}`
+    const contentType =
+      ext === 'png' ? 'image/png'
+      : ext === 'webp' ? 'image/webp'
+      : ext === 'svg' ? 'image/svg+xml'
+      : ext === 'gif' ? 'image/gif'
+      : 'image/jpeg'
+    const { error: upErr } = await supabase.storage
+      .from('media')
+      .upload(objectPath, bytes, { contentType, upsert: false })
+    if (upErr) throw new Error(`Upload failed: ${upErr.message}`)
+    const fileUrl = supabase.storage.from('media').getPublicUrl(objectPath).data.publicUrl
 
-    let fileUrl: string
-    if (isLocalShim) {
-      const fs = await import('node:fs')
-      const path = await import('node:path')
-      const fname = `${randomUUID()}.${ext}`
-      const uploadsDir = path.resolve(process.cwd(), 'public', 'uploads')
-      if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true })
-      fs.writeFileSync(path.join(uploadsDir, fname), bytes)
-      fileUrl = `/uploads/${fname}`
-    } else {
-      const objectPath = `${tenantId}/${randomUUID()}.${ext}`
-      const contentType =
-        ext === 'png' ? 'image/png'
-        : ext === 'webp' ? 'image/webp'
-        : ext === 'svg' ? 'image/svg+xml'
-        : ext === 'gif' ? 'image/gif'
-        : 'image/jpeg'
-      const { error: upErr } = await supabase.storage
-        .from('media')
-        .upload(objectPath, bytes, { contentType, upsert: false })
-      if (upErr) throw new Error(`Upload failed: ${upErr.message}`)
-      fileUrl = supabase.storage.from('media').getPublicUrl(objectPath).data.publicUrl
-    }
-
-    const row: DuckAssetRow = {
-      id: randomUUID(), tenant_id: tenantId, name: data.name,
-      asset_type: data.asset_type, vehicle: data.vehicle ?? null,
-      sub_category: data.sub_category ?? null,
-      file_url: fileUrl, file_size: data.file_size ?? bytes.length,
-      metadata: null, created_at: new Date().toISOString(),
-    }
-    const { upsertAsset } = await import('./analytics.duckdb')
-    await upsertAsset(row)
-    return duckAssetToMediaAsset(row)
+    const { data: row, error: insErr } = await supabase
+      .from('marketing_assets')
+      .insert({
+        id: randomUUID(), tenant_id: tenantId, name: data.name,
+        asset_type: data.asset_type, vehicle: data.vehicle ?? null,
+        sub_category: data.sub_category ?? null,
+        file_url: fileUrl, file_size: data.file_size ?? bytes.length,
+      })
+      .select('*')
+      .single()
+    if (insErr) throw new Error(`Failed to save asset: ${insErr.message}`)
+    return row as MediaAsset
   })
 
 export const deleteAsset = createServerFn({ method: 'POST' })
@@ -1140,27 +1130,24 @@ export const deleteAsset = createServerFn({ method: 'POST' })
   .handler(async ({ data }): Promise<{ ok: true }> => {
     const supabase = getSupabaseServerClient()
     const { tenantId } = await authCtx(supabase)
-    // Remove the underlying file (best-effort; the DB row removal below is the
-    // source of truth). Local dev files are on disk (/uploads/...); prod files
-    // are Supabase Storage objects (.../object/public/media/<objectPath>).
+    // Remove the underlying Storage object (best-effort; the DB row removal
+    // below is the source of truth). File URLs are of the form
+    // .../object/public/media/<objectPath>.
     try {
-      if (data.file_url.startsWith('/uploads/')) {
-        const fs = await import('node:fs')
-        const path = await import('node:path')
-        const filePath = path.resolve(process.cwd(), 'public', data.file_url.replace(/^\//, ''))
-        if (fs.existsSync(filePath)) fs.unlinkSync(filePath)
-      } else {
-        const marker = '/media/'
-        const idx = data.file_url.indexOf(marker)
-        if (idx !== -1) {
-          await supabase.storage.from('media').remove([data.file_url.slice(idx + marker.length)])
-        }
+      const marker = '/media/'
+      const idx = data.file_url.indexOf(marker)
+      if (idx !== -1) {
+        await supabase.storage.from('media').remove([data.file_url.slice(idx + marker.length)])
       }
     } catch {
       /* best-effort */
     }
-    const { deleteAssetRow } = await import('./analytics.duckdb')
-    await deleteAssetRow(data.assetId, tenantId)
+    const { error } = await supabase
+      .from('marketing_assets')
+      .delete()
+      .eq('id', data.assetId)
+      .eq('tenant_id', tenantId)
+    if (error) throw new Error(`Failed to delete asset: ${error.message}`)
     return { ok: true }
   })
 
@@ -1169,9 +1156,7 @@ export const getAssets = createServerFn({ method: 'GET' })
   .handler(async ({ data }): Promise<Array<MediaAsset>> => {
     const supabase = getSupabaseServerClient()
     const { tenantId } = await authCtx(supabase)
-    const { listAssets } = await import('./analytics.duckdb')
-    const rows = await listAssets(tenantId, data as { vehicle?: string; asset_type?: string })
-    return rows.map(duckAssetToMediaAsset)
+    return queryAssets(supabase, tenantId, data)
   })
 
 // =====================================================================
@@ -1835,8 +1820,8 @@ export const saveEventContent = createServerFn({ method: 'POST' })
 
 // Direct browser → FastAPI multipart upload (same pattern as publishYouTubeVideo /
 // uploadCallRecording — video files are too large to round-trip as base64 JSON).
-// Returns the served /videos/... path; caller prefixes FASTAPI_URL to get an
-// absolute URL before persisting it as video_url via saveContentVideoUrl.
+// Returns an absolute Supabase Storage URL, ready to persist as video_url via
+// saveContentVideoUrl.
 export async function uploadContentVideo(
   tenantId: string,
   file: File,
@@ -1850,7 +1835,7 @@ export async function uploadContentVideo(
     throw new Error(err.detail ?? `Video upload failed: ${res.status}`)
   }
   const json = (await res.json()) as { video_url: string }
-  return { video_url: `${FASTAPI_URL}${json.video_url}` }
+  return { video_url: json.video_url }
 }
 
 // Persist (or clear) a Content Studio video attachment. Kept separate from
@@ -1964,8 +1949,6 @@ export const generatePosterImage = createServerFn({ method: 'POST' })
   .handler(async ({ data }): Promise<{ ok: true; url: string; path: string }> => {
     const supabase = getSupabaseServerClient()
     const { tenantId } = await authCtx(supabase)
-    const nodePath = await import('node:path')
-    const { readFile } = await import('node:fs/promises')
 
     const mode = data.mode ?? 'create'
     let imageB64: string | null = null
@@ -1987,7 +1970,8 @@ export const generatePosterImage = createServerFn({ method: 'POST' })
       if (!imageB64) throw new Error('Could not load the existing poster to refine — regenerate it first.')
     } else {
       // Create: resolve the car photo — campaign asset for days; most recent
-      // vehicle upload for events (and as day fallback). Uploads stay web-side.
+      // vehicle upload for events (and as day fallback). Assets live in
+      // Supabase Storage, fetched over HTTP.
       let assetUrl = data.asset_url ?? null
       if (!assetUrl) {
         try {
@@ -1996,28 +1980,30 @@ export const generatePosterImage = createServerFn({ method: 'POST' })
           assetUrl = assets[0]?.file_url ?? null
         } catch { /* generate without a car photo */ }
       }
-      if (assetUrl?.startsWith('/')) {
+      if (assetUrl) {
         try {
-          const filePath = nodePath.resolve(process.cwd(), 'public', assetUrl.replace(/^\//, ''))
-          const buf = await readFile(filePath)
-          imageB64 = buf.toString('base64')
-          imageMime = assetUrl.toLowerCase().endsWith('.png') ? 'image/png' : 'image/jpeg'
+          const assetRes = await fetch(assetUrl)
+          if (assetRes.ok) {
+            imageB64 = Buffer.from(await assetRes.arrayBuffer()).toString('base64')
+            imageMime = assetUrl.toLowerCase().endsWith('.png') ? 'image/png' : 'image/jpeg'
+          }
         } catch (e) {
-          console.warn('[generatePosterImage] asset read failed, text-only generation:', e)
+          console.warn('[generatePosterImage] asset fetch failed, text-only generation:', e)
         }
       }
 
       // Load user-selected logo — highest priority branding, must arrive before car photo.
       const logoUrl = data.logo_url ?? null
-      if (logoUrl?.startsWith('/')) {
+      if (logoUrl) {
         try {
-          const logoPath = nodePath.resolve(process.cwd(), 'public', logoUrl.replace(/^\//, ''))
-          const buf = await readFile(logoPath)
-          logoB64 = buf.toString('base64')
-          logoMime = logoUrl.toLowerCase().endsWith('.jpg') || logoUrl.toLowerCase().endsWith('.jpeg')
-            ? 'image/jpeg' : 'image/png'
+          const logoRes = await fetch(logoUrl)
+          if (logoRes.ok) {
+            logoB64 = Buffer.from(await logoRes.arrayBuffer()).toString('base64')
+            logoMime = logoUrl.toLowerCase().endsWith('.jpg') || logoUrl.toLowerCase().endsWith('.jpeg')
+              ? 'image/jpeg' : 'image/png'
+          }
         } catch (e) {
-          console.warn('[generatePosterImage] logo read failed, generating without logo:', e)
+          console.warn('[generatePosterImage] logo fetch failed, generating without logo:', e)
         }
       }
     }
@@ -2051,9 +2037,9 @@ export const generatePosterImage = createServerFn({ method: 'POST' })
     }
     const json = (await res.json()) as { image_b64: string; mime: string; path: string }
 
-    // Absolute backend URL (served by FastAPI /posters) — persisted on the row.
+    // json.path is an absolute Supabase Storage URL — persisted on the row.
     // ?v= busts the browser cache when a refine overwrites the same file.
-    const posterUrl = json.path ? `${FASTAPI_URL}${json.path}?v=${Date.now()}` : ''
+    const posterUrl = json.path ? `${json.path}?v=${Date.now()}` : ''
     if (posterUrl) {
       try {
         const { updateDayContent, updateOpportunityContent } = await import('./analytics.duckdb')

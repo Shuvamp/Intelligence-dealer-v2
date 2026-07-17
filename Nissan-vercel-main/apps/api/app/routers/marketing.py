@@ -4,19 +4,17 @@ from typing import Optional
 from pathlib import Path
 import base64
 import logging
+import mimetypes
 import re
 import uuid
 import httpx
 
-from app.config import CALENDARIFIC_API_KEY
+from app import storage
+from app.config import CALENDARIFIC_API_KEY, SUPABASE_POSTERS_BUCKET, SUPABASE_VIDEOS_BUCKET
 from app.poster_prompt import build_poster_prompt
 
 logger = logging.getLogger(__name__)
 
-# Generated posters are stored in the backend (served by main.py at /posters).
-POSTERS_DIR = Path(__file__).resolve().parent.parent.parent / "generated" / "posters"
-# User-attached videos (Content Studio → YouTube) — served by main.py at /videos.
-VIDEOS_DIR = Path(__file__).resolve().parent.parent.parent / "generated" / "videos"
 _ALLOWED_VIDEO_EXT = {".mp4", ".mov", ".webm", ".avi", ".mkv"}
 _MAX_VIDEO_BYTES = 500 * 1024 * 1024  # 500MB — generous for a dealer-made promo clip
 from app.gemini import gemini_image, has_gemini_key
@@ -406,7 +404,7 @@ def _event_stem(req: "BannerRequest") -> str:
 
 
 def _save_poster(req: "BannerRequest", data: bytes, ext: str) -> str:
-    """Write the poster under a structured folder and return its /posters/… path."""
+    """Upload the poster under a structured object key and return its public Storage URL."""
     if req.kind == "campaign" and req.campaign_id:
         rel = Path("campaigns") / _safe(req.campaign_id) / f"day{(req.day_num or 0):02d}_{_safe(req.day_date or 'date')}.{ext}"
     elif req.kind == "event":
@@ -414,26 +412,24 @@ def _save_poster(req: "BannerRequest", data: bytes, ext: str) -> str:
         rel = Path("events") / ym / f"{_event_stem(req)}.{ext}"
     else:
         rel = Path("misc") / f"{uuid.uuid4().hex}.{ext}"
-    dest = POSTERS_DIR / rel
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    dest.write_bytes(data)
-    return "/posters/" + rel.as_posix()
+    mime = "image/png" if ext == "png" else "image/jpeg"
+    return storage.upload(SUPABASE_POSTERS_BUCKET, rel.as_posix(), data, mime)
 
 
-def _find_existing_poster(req: "BannerRequest") -> "Path | None":
-    """Return the path of an existing poster file for this request, or None."""
+def _find_existing_poster(req: "BannerRequest") -> "str | None":
+    """Return the Storage object key of an existing poster for this request, or None."""
     if req.kind == "campaign" and req.campaign_id:
         stem = f"day{(req.day_num or 0):02d}_{_safe(req.day_date or 'date')}"
-        parent = POSTERS_DIR / "campaigns" / _safe(req.campaign_id)
+        parent = f"campaigns/{_safe(req.campaign_id)}"
     elif req.kind == "event":
         ym = (req.day_date or "")[:7] or "undated"
         stem = _event_stem(req)
-        parent = POSTERS_DIR / "events" / ym
+        parent = f"events/{ym}"
     else:
         return None
     for ext in ("jpg", "png"):
-        candidate = parent / f"{stem}.{ext}"
-        if candidate.exists():
+        candidate = f"{parent}/{stem}.{ext}"
+        if storage.exists(SUPABASE_POSTERS_BUCKET, candidate):
             return candidate
     return None
 
@@ -446,24 +442,20 @@ def poster_banner(req: BannerRequest):
     if req.mode == "create" and not req.force_regenerate:
         existing = _find_existing_poster(req)
         if existing:
-            try:
-                data = existing.read_bytes()
+            data = storage.download(SUPABASE_POSTERS_BUCKET, existing)
+            if data is not None:
                 b64 = base64.b64encode(data).decode()
-                ext = existing.suffix.lstrip(".")
+                ext = existing.rsplit(".", 1)[-1]
                 mime = "image/png" if ext == "png" else "image/jpeg"
-                path = "/posters/" + existing.relative_to(POSTERS_DIR).as_posix()
-                logger.info("[poster] cached on disk → %s", path)
+                path = storage.public_url(SUPABASE_POSTERS_BUCKET, existing)
+                logger.info("[poster] cached in storage → %s", path)
                 return BannerResponse(image_b64=b64, mime=mime, path=path)
-            except Exception as exc:
-                logger.warning("[poster] disk read failed (%s) — regenerating", exc)
+            logger.warning("[poster] storage download failed for %s — regenerating", existing)
     elif req.force_regenerate:
         existing = _find_existing_poster(req)
         if existing:
-            try:
-                existing.unlink()
-                logger.info("[poster] force_regenerate — deleted cached %s", existing)
-            except Exception as exc:
-                logger.warning("[poster] could not delete cached poster (%s)", exc)
+            storage.remove(SUPABASE_POSTERS_BUCKET, existing)
+            logger.info("[poster] force_regenerate — deleted cached %s", existing)
 
     # Master prompt assembled in app/poster_prompt.py (single source of truth).
     prompt = build_poster_prompt(
@@ -488,7 +480,7 @@ def poster_banner(req: BannerRequest):
 
 @router.post("/poster/regenerate", response_model=BannerResponse)
 def poster_regenerate(req: BannerRequest):
-    """Force-regenerate a poster, ignoring any cached file on disk."""
+    """Force-regenerate a poster, ignoring any cached file in Storage."""
     req.force_regenerate = True
     return poster_banner(req)
 
@@ -498,14 +490,14 @@ def poster_regenerate(req: BannerRequest):
 # and app/services/youtube.py's upload_video) ────────────────────────────────
 
 class VideoUploadResponse(BaseModel):
-    video_url: str   # served path, e.g. /videos/<tenant_id>/<uuid>.mp4
+    video_url: str   # public Supabase Storage URL
 
 
 @router.post("/video/upload", response_model=VideoUploadResponse)
 async def video_upload(tenant_id: str = Form(...), video: UploadFile = File(...)):
-    """Save a Content Studio video attachment to disk and return its served
-    path. Mirrors _save_poster's role for images — the returned path is what
-    gets persisted as campaign_days.video_url / opportunities.video_url."""
+    """Upload a Content Studio video attachment to Supabase Storage and return
+    its public URL. Mirrors _save_poster's role for images — the returned URL
+    is what gets persisted as campaign_days.video_url / opportunities.video_url."""
     ext = Path(video.filename or "").suffix.lower()
     if ext not in _ALLOWED_VIDEO_EXT:
         raise HTTPException(status_code=400, detail=f"Unsupported video format '{ext}'. Allowed: {sorted(_ALLOWED_VIDEO_EXT)}")
@@ -516,12 +508,14 @@ async def video_upload(tenant_id: str = Form(...), video: UploadFile = File(...)
     if len(contents) > _MAX_VIDEO_BYTES:
         raise HTTPException(status_code=413, detail=f"File exceeds {_MAX_VIDEO_BYTES // (1024 * 1024)} MB limit")
 
-    dest_dir = VIDEOS_DIR / _safe(tenant_id)
-    dest_dir.mkdir(parents=True, exist_ok=True)
-    fname = f"{uuid.uuid4().hex}{ext}"
-    (dest_dir / fname).write_bytes(contents)
+    object_key = f"{_safe(tenant_id)}/{uuid.uuid4().hex}{ext}"
+    content_type = mimetypes.guess_type(object_key)[0] or "application/octet-stream"
+    try:
+        video_url = storage.upload(SUPABASE_VIDEOS_BUCKET, object_key, contents, content_type)
+    except Exception as exc:
+        logger.error("[video:upload] tenant=%s storage upload failed (%s)", tenant_id, exc)
+        raise HTTPException(status_code=502, detail="Video upload to storage failed") from exc
 
-    video_url = f"/videos/{_safe(tenant_id)}/{fname}"
     logger.info("[video:upload] tenant=%s saved → %s (%d bytes)", tenant_id, video_url, len(contents))
     return VideoUploadResponse(video_url=video_url)
 

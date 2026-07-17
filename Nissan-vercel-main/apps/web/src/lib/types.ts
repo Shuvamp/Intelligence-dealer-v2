@@ -569,7 +569,7 @@ export interface MediaAsset {
   asset_type: 'vehicle' | 'logo' | 'background' | 'brand_asset'
   vehicle?: string | null
   sub_category?: string | null
-  file_url: string        // /uploads/{uuid}.ext — served by Vite
+  file_url: string        // Supabase Storage public URL (media bucket)
   file_size?: number | null
   metadata?: string | null
   created_at: string

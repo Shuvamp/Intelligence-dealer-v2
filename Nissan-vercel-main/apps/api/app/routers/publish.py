@@ -43,7 +43,7 @@ class PublishRequest(BaseModel):
     title: str | None = None
     description: str | None = None
     platforms: list[str] | None = None  # default: all connected of _DEFAULT_PLATFORMS
-    video_url: str | None = None        # required for youtube — /videos/<tenant>/<file>
+    video_url: str | None = None        # required for youtube — Supabase Storage URL
     privacy_status: str = "private"     # youtube only: private | unlisted | public
 
 
@@ -73,7 +73,7 @@ async def publish(req: PublishRequest):
         logger.warning("[publish] image fetch failed: %s", e)
 
     for platform in targets:
-        row = channel_store.get(req.tenant_id, platform)
+        row = await channel_store.get(req.tenant_id, platform)
         connected = bool(row and row.get("status") == "connected" and row.get("access_token"))
         if not connected:
             results[platform] = {"status": "skipped", "reason": "not_connected"}

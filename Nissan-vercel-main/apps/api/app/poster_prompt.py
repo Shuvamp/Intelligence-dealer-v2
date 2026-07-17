@@ -34,25 +34,39 @@ _FORMAT_RULE = (
     "or website hero layouts under any circumstances."
 )
 
+# Never phrase composition guidance as short quoted label-like tokens (e.g.
+# "ZONE 1 TOP") — image models reliably echo such tokens as literal on-image
+# text, and negating the exact same quoted string right next to its use makes
+# this worse, not better. Use plain descriptive prose instead, with no
+# generic instruction below to keep things reinforced.
+_NO_ANNOTATIONS_RULE = (
+    "The final image must contain ONLY real, finished marketing content — actual logo, actual "
+    "vehicle, actual headline copy, actual offer/CTA text, actual fine-print disclaimer. Do NOT "
+    "render any section names, layout markers, numbering, bounding boxes, crop marks, alignment "
+    "guides, grid lines, rulers, placeholder text (e.g. 'headline here', 'logo here'), watermarks, "
+    "or any other planning/debugging overlay — the composition guidance below describes where "
+    "content goes, not text to draw."
+)
+
 def _layout_zones(has_logo: bool) -> str:
-    """Return the 5-zone layout instruction, with Zone 1 adapted to logo source."""
-    zone1 = (
-        "ZONE 1 TOP — USE ONLY the logo from the FIRST image provided as input. "
+    """Return the layout instruction, top-to-bottom, as plain prose (no ZONE-style labels)."""
+    top_strip = (
+        "Top strip: USE ONLY the logo from the FIRST image provided as input. "
         "Render it EXACTLY as given — preserve every colour, shape, and letter. "
         "Do NOT redesign, recolour, shrink, crop, replace, or in any way alter it. "
         "Do NOT substitute it with any stock Nissan logo, generated emblem, or default branding. "
         "Place it top-left or top-center."
         if has_logo else
-        "ZONE 1 TOP — Nissan logo (top-left or top-center) + campaign badge/tagline chip."
+        "Top strip: Nissan logo (top-left or top-center) + campaign badge/tagline chip."
     )
     return (
-        "LAYOUT — five zones stacked top to bottom, no zone may be omitted:\n"
-        f"  {zone1}\n"
-        "  ZONE 2 UPPER  — Headline text (large, bold) + 1-line supporting subtext below it.\n"
-        "  ZONE 3 CENTER — Hero vehicle: large, fully visible, sharp, dynamically lit. "
+        "LAYOUT — stack five sections top to bottom, none may be omitted:\n"
+        f"  {top_strip}\n"
+        "  Upper section: Headline text (large, bold) + 1-line supporting subtext below it.\n"
+        "  Middle section: Hero vehicle — large, fully visible, sharp, dynamically lit. "
         "The car must not be cropped; show the full body including wheels.\n"
-        "  ZONE 4 LOWER  — Offer details (price/discount/EMI) + prominent CTA (e.g. 'Book Now', 'Test Drive').\n"
-        "  ZONE 5 BOTTOM — Fine-print disclaimer / T&C in small legible text."
+        "  Lower section: Offer details (price/discount/EMI) + prominent CTA (e.g. 'Book Now', 'Test Drive').\n"
+        "  Bottom strip: Fine-print disclaimer / T&C in small legible text."
     )
 
 # Channel → secondary composition hint (portrait format already enforced above).
@@ -116,6 +130,7 @@ def build_poster_prompt(
             "overall layout, branding, headline and colours otherwise intact:\n"
             f'  "{instr or "improve the overall polish and lighting"}"\n'
             f"{_FORMAT_RULE}\n"
+            f"{_NO_ANNOTATIONS_RULE}\n"
             "Return the complete edited poster in VERTICAL PORTRAIT 4:5 (1080×1350 px), "
             "high resolution, photoreal, spelling any text exactly as shown."
         )
@@ -140,6 +155,8 @@ def build_poster_prompt(
 
     _FORMAT_RULE,
 
+    _NO_ANNOTATIONS_RULE,
+
     _layout_zones(has_logo),
 
     "The final image should resemble a professionally designed Nissan India advertising campaign similar to premium festival, lifestyle, family, seasonal, awareness or promotional campaigns.",
@@ -148,11 +165,11 @@ def build_poster_prompt(
     "Campaign story, environment, people, culture, lifestyle and atmosphere.",
 
     "SECONDARY FOCUS:",
-    "The Nissan vehicle integrated naturally into the campaign story — large and fully visible in ZONE 3 CENTER.",
+    "The Nissan vehicle integrated naturally into the campaign story — large and fully visible in the middle section.",
 
     "COMPOSITION RULES:",
-    "Respect the five-zone layout strictly. Environment and storytelling occupy the background.",
-    "Vehicle must be fully visible (no cropping), sharp, dynamically lit, placed in the center zone.",
+    "Respect the five-section layout strictly. Environment and storytelling occupy the background.",
+    "Vehicle must be fully visible (no cropping), sharp, dynamically lit, placed in the middle section.",
     "Create a complete social media advertising creative, not a catalog image.",
 
     BRAND_STYLE,
@@ -175,11 +192,11 @@ def build_poster_prompt(
         lines.append(f'Add a small premium offer badge with the text "{offer}".')
     if has_logo:
         lines.append(
-            "LOGO MANDATE (highest priority): The logo in ZONE 1 MUST be taken verbatim from the "
+            "LOGO MANDATE (highest priority): The logo in the top strip MUST be taken verbatim from the "
             "FIRST image supplied as input. Render it pixel-perfect — same colours, same shape, "
             "same text. Do NOT generate, hallucinate, redesign, recolour, or substitute any other "
             "logo, emblem, or Nissan stock branding. The user-selected logo is the ONLY branding "
-            "permitted in this zone."
+            "permitted in this section."
         )
     else:
         lines.append("Include a small, correct NISSAN logo/badge.")
@@ -187,11 +204,12 @@ def build_poster_prompt(
         lines.append(f"Optimise the layout for {channel} — {channel_hint}.")
     lines.append(
         "Warm cinematic advertising lighting, rich saturated colours, balanced premium composition, "
-        "and clean negative space in each zone so text stays legible."
+        "and clean negative space in each section so text stays legible."
     )
     lines.append(
         "Final output: VERTICAL PORTRAIT 4:5 (1080×1350 px). "
-        "Do NOT add watermarks, stock logos, gibberish or misspelt text; spell every word exactly as given."
+        "Do NOT add watermarks, stock logos, gibberish or misspelt text; spell every word exactly as given. "
+        "Do NOT add section labels, layout numbers, bounding boxes, crop marks, or any planning/debug text."
     )
     if instr:
         lines.append(f"Additional art direction from the user: {instr}")

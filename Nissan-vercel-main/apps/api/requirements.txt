@@ -5,7 +5,6 @@ langgraph
 langchain-core
 langchain-anthropic
 anthropic
-duckdb
 python-dotenv
 pydantic
 pydantic-settings

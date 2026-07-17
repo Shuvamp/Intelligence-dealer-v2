@@ -30,7 +30,7 @@ POLL_SECONDS = 60
 
 async def _tick() -> None:
     now = db.now_iso()
-    due = await asyncio.to_thread(db.list_due_posts, now)
+    due = await db.list_due_posts(now)
     if not due:
         logger.debug("[auto-publish] tick %s — nothing due", now)
         return

@@ -203,8 +203,7 @@ function MediaLibrary() {
   }
 
   function copyUrl(asset: MediaAsset) {
-    const url = typeof window !== 'undefined' ? `${window.location.origin}${asset.file_url}` : asset.file_url
-    navigator.clipboard.writeText(url).then(() => {
+    navigator.clipboard.writeText(asset.file_url).then(() => {
       setCopiedId(asset.id)
       setTimeout(() => setCopiedId((c) => (c === asset.id ? null : c)), 1500)
     })
