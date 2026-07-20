@@ -9,7 +9,10 @@ import {
   getYouTubeStatus,
   disconnectYouTube,
   disconnectFacebook,
+  connectWhatsApp,
+  disconnectWhatsApp,
 } from '#/lib/marketing'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '#/components/ui/dialog'
 import type { ChannelConnection, LinkedInState } from '#/lib/types'
 import {
   CheckCircle2, RefreshCw, ExternalLink, Loader2, AlertCircle,
@@ -83,6 +86,12 @@ function ConnectedChannels() {
   const [banner, setBanner] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [connectState, setConnectState] = useState<Record<string, ConnectState>>({})
+
+  // WhatsApp manual-credential connect modal (no OAuth).
+  const [waModalOpen, setWaModalOpen] = useState(false)
+  const [waForm, setWaForm] = useState({ phone_number_id: '', access_token: '', display_name: '' })
+  const [waSubmitting, setWaSubmitting] = useState(false)
+  const [waError, setWaError] = useState<string | null>(null)
 
   const setChannelState = (ch: string, s: ConnectState) =>
     setConnectState(prev => ({ ...prev, [ch]: s }))
@@ -313,10 +322,32 @@ function ConnectedChannels() {
     return () => clearTimeout(t)
   }, [banner])
 
+  const submitWhatsApp = async () => {
+    setWaSubmitting(true)
+    setWaError(null)
+    try {
+      const res = await connectWhatsApp({ data: {
+        phone_number_id: waForm.phone_number_id.trim(),
+        access_token: waForm.access_token.trim(),
+        display_name: waForm.display_name.trim() || undefined,
+      } })
+      setChannelState('whatsapp', 'success')
+      setBanner({ type: 'success', message: `WhatsApp connected${res.handle ? ` — ${res.handle}` : ''}` })
+      setWaModalOpen(false)
+      setWaForm({ phone_number_id: '', access_token: '', display_name: '' })
+      await router.invalidate()
+    } catch (e) {
+      setWaError(e instanceof Error ? e.message : 'Connection failed. Check your credentials.')
+    } finally {
+      setWaSubmitting(false)
+    }
+  }
+
   const handleConnect = async (channel: string) => {
     if (channel === 'linkedin') { await checkLinkedInThenAct(); return }
     if (channel === 'youtube') { await startYouTubeOAuth(); return }
     if (channel === 'facebook') { await startFacebookOAuth(); return }
+    if (channel === 'whatsapp') { setWaError(null); setWaModalOpen(true); return }
     if (channel !== 'instagram') {
       alert(`${CHANNEL_META[channel]?.label ?? channel} connection coming soon.`)
       return
@@ -349,6 +380,8 @@ function ConnectedChannels() {
         await disconnectFacebook()
         try { localStorage.removeItem('facebook_connection') } catch {}
         setFbLocal(null)
+      } else if (channel === 'whatsapp') {
+        await disconnectWhatsApp()
       } else {
         await disconnectInstagram({ data: { channel_id: channel } })
         if (channel === 'instagram') {
@@ -369,7 +402,7 @@ function ConnectedChannels() {
     // No /api/facebook/sync yet — and the generic instagram-sync endpoint is
     // hardcoded to the "instagram" row, so routing facebook through it would
     // silently touch the wrong channel. Guard here too (not just the button).
-    if (channel === 'facebook') return
+    if (channel === 'facebook' || channel === 'whatsapp') return
     setBusy(`${channel}-sync`)
     try {
       if (channel === 'youtube') {
@@ -391,7 +424,7 @@ function ConnectedChannels() {
   const handleSyncAll = async () => {
     setBusy('sync-all')
     try {
-      const targets = connectedChannels.map((c) => c.channel).filter((c) => c !== 'facebook')
+      const targets = connectedChannels.map((c) => c.channel).filter((c) => c !== 'facebook' && c !== 'whatsapp')
       for (const channel of targets) {
         if (channel === 'youtube') {
           await getYouTubeStatus()
@@ -495,7 +528,7 @@ function ConnectedChannels() {
                 <MoreHorizontal className="h-4 w-4" />
               </summary>
               <div className="absolute right-0 z-20 mt-1.5 w-52 overflow-hidden rounded-[12px] border border-border bg-card py-1 shadow-float">
-                {!isLinkedIn && !isYouTube && !isFacebook && (
+                {!isLinkedIn && !isYouTube && !isFacebook && ch.channel !== 'whatsapp' && (
                   <button
                     className="flex w-full items-center gap-2 px-3 py-2 text-left text-[13px] text-foreground transition hover:bg-muted disabled:opacity-50"
                     disabled={busy !== null}
@@ -645,7 +678,7 @@ function ConnectedChannels() {
                   Open
                 </Button>
               )}
-              {!isLinkedIn && !isYouTube && !isFacebook && !isInstagram && (
+              {!isLinkedIn && !isYouTube && !isFacebook && !isInstagram && ch.channel !== 'whatsapp' && (
                 <Button
                   variant="outline"
                   className="h-9 px-3.5 text-[12.5px]"
@@ -850,6 +883,73 @@ function ConnectedChannels() {
           </div>
         )}
       </div>
+
+      {/* WhatsApp manual-credential connect modal */}
+      <Dialog open={waModalOpen} onOpenChange={(v) => { if (!v && !waSubmitting) setWaModalOpen(false) }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-[15px]">
+              <ChannelIcon channel="whatsapp" /> Connect WhatsApp Business
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <p className="text-[12.5px] leading-relaxed text-muted-foreground">
+              WhatsApp Cloud API has no login popup. Paste your <strong>Phone Number ID</strong> and a
+              permanent <strong>Access Token</strong> from Meta → WhatsApp → API Setup.
+            </p>
+            <label className="block">
+              <span className="text-[12px] font-semibold text-foreground">Phone Number ID</span>
+              <input
+                type="text"
+                value={waForm.phone_number_id}
+                onChange={(e) => setWaForm((f) => ({ ...f, phone_number_id: e.target.value }))}
+                placeholder="e.g. 123456789012345"
+                className="mt-1 h-10 w-full rounded-[10px] border border-border bg-card px-3 text-[13px] text-foreground focus:outline-none focus:ring-2 focus:ring-ring/25"
+              />
+            </label>
+            <label className="block">
+              <span className="text-[12px] font-semibold text-foreground">Access Token</span>
+              <input
+                type="password"
+                value={waForm.access_token}
+                onChange={(e) => setWaForm((f) => ({ ...f, access_token: e.target.value }))}
+                placeholder="Permanent token (EAAG…)"
+                className="mt-1 h-10 w-full rounded-[10px] border border-border bg-card px-3 text-[13px] text-foreground focus:outline-none focus:ring-2 focus:ring-ring/25"
+              />
+            </label>
+            <label className="block">
+              <span className="text-[12px] font-semibold text-foreground">Display name <span className="font-normal text-muted-foreground">(optional)</span></span>
+              <input
+                type="text"
+                value={waForm.display_name}
+                onChange={(e) => setWaForm((f) => ({ ...f, display_name: e.target.value }))}
+                placeholder="Overrides Meta's verified name"
+                className="mt-1 h-10 w-full rounded-[10px] border border-border bg-card px-3 text-[13px] text-foreground focus:outline-none focus:ring-2 focus:ring-ring/25"
+              />
+            </label>
+            {waError && (
+              <div className="flex items-start gap-2 rounded-[10px] border border-rose-200 bg-rose-50 px-3 py-2 text-[12px] text-rose-700">
+                <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                <span>{waError}</span>
+              </div>
+            )}
+            <div className="flex justify-end gap-2 pt-1">
+              <Button variant="outline" className="h-9 px-3.5 text-[12.5px]" disabled={waSubmitting} onClick={() => setWaModalOpen(false)}>
+                Cancel
+              </Button>
+              <Button
+                variant="primary"
+                className="h-9 px-3.5 text-[12.5px]"
+                disabled={waSubmitting || !waForm.phone_number_id.trim() || !waForm.access_token.trim()}
+                onClick={submitWhatsApp}
+              >
+                {waSubmitting && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                Connect
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

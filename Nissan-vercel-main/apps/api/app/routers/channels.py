@@ -23,7 +23,10 @@ def _account_fields(channel: str, row: dict) -> tuple[str | None, str | None]:
         return row.get("linkedin_id"), (row.get("handle") or row.get("page_name"))
     if channel == "youtube":
         return row.get("youtube_channel_id"), (row.get("youtube_channel_name") or row.get("handle"))
-    # google_business / whatsapp: no identity persisted yet.
+    if channel == "whatsapp":
+        # page_id holds the phone_number_id; page_name holds the verified business name.
+        return row.get("page_id"), row.get("page_name")
+    # google_business: no identity persisted yet.
     return None, None
 
 

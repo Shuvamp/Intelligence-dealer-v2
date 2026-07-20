@@ -16,15 +16,19 @@ from .mock_provider import _parse_meta_payload
 
 logger = logging.getLogger(__name__)
 
-def _api_url() -> str:
-    phone_id = os.getenv("WHATSAPP_PHONE_NUMBER_ID", "")
-    return f"https://graph.facebook.com/v20.0/{phone_id}/messages"
-
-
 class MetaWhatsAppProvider:
+    def __init__(self, access_token: str | None = None, phone_number_id: str | None = None):
+        # Per-tenant creds (from the channel_store connection) take precedence;
+        # fall back to env so get_provider()/CI keep working with zero args.
+        self._token = access_token or os.getenv("WHATSAPP_ACCESS_TOKEN", "")
+        self._phone_id = phone_number_id or os.getenv("WHATSAPP_PHONE_NUMBER_ID", "")
+
+    def _api_url(self) -> str:
+        return f"https://graph.facebook.com/v20.0/{self._phone_id}/messages"
+
     def _headers(self) -> dict:
         return {
-            "Authorization": f"Bearer {os.getenv('WHATSAPP_ACCESS_TOKEN', '')}",
+            "Authorization": f"Bearer {self._token}",
             "Content-Type": "application/json",
         }
 
@@ -36,7 +40,7 @@ class MetaWhatsAppProvider:
             "text": {"body": message},
         }
         async with httpx.AsyncClient(timeout=15) as c:
-            r = await c.post(_api_url(), json=payload, headers=self._headers())
+            r = await c.post(self._api_url(), json=payload, headers=self._headers())
             if not r.is_success:
                 err = r.json() if "application/json" in r.headers.get("content-type", "") else r.text
                 logger.error("Meta API %s → %s", r.status_code, err)
@@ -54,7 +58,7 @@ class MetaWhatsAppProvider:
             "image": {"id": media_id, **({"caption": caption} if caption else {})},
         }
         async with httpx.AsyncClient(timeout=15) as c:
-            r = await c.post(_api_url(), json=payload, headers=self._headers())
+            r = await c.post(self._api_url(), json=payload, headers=self._headers())
             if not r.is_success:
                 err = r.json() if "application/json" in r.headers.get("content-type", "") else r.text
                 logger.error("Meta API %s → %s", r.status_code, err)
@@ -75,7 +79,7 @@ class MetaWhatsAppProvider:
             media_type: {"link": url, **({"caption": caption} if caption else {})},
         }
         async with httpx.AsyncClient(timeout=15) as c:
-            r = await c.post(_api_url(), json=payload, headers=self._headers())
+            r = await c.post(self._api_url(), json=payload, headers=self._headers())
             if not r.is_success:
                 err = r.json() if "application/json" in r.headers.get("content-type", "") else r.text
                 logger.error("Meta API %s → %s", r.status_code, err)
