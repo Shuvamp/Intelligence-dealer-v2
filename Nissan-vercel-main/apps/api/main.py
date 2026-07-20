@@ -47,7 +47,7 @@ from agents.call_intelligence.service import (
 from agents.call_intelligence.data import CallData
 from agents.events import bus, DomainEvent, EventType  # Phase 7 — event bus
 
-from app.routers import marketing, instagram, auth, linkedin, youtube, facebook, channels, publish, context_planner, website_extraction, company_summary, seo_agent, aeo_agent, recommendation_engine, report_generator, marketing_strategy, marketing_budget_planner, assignments
+from app.routers import marketing, instagram, auth, linkedin, youtube, facebook, channels, publish, context_planner, website_extraction, company_summary, seo_agent, aeo_agent, recommendation_engine, report_generator, marketing_strategy, marketing_budget_planner, whatsapp_channel, assignments
 from app.routers import db as db_router
 
 # GROQ_API_KEY (and the rest of apps/api/.env) is read ONCE at import time above.
@@ -77,6 +77,7 @@ app.include_router(linkedin.router, prefix="/api/linkedin", tags=["linkedin"])
 app.include_router(youtube.router, prefix="/api/youtube", tags=["youtube"])
 app.include_router(facebook.router, prefix="/api/facebook", tags=["facebook"])
 app.include_router(channels.router, prefix="/api/channels", tags=["channels"])
+app.include_router(whatsapp_channel.router, prefix="/api/whatsapp-channel", tags=["whatsapp-channel"])
 app.include_router(publish.router, prefix="/api/publish", tags=["publish"])
 app.include_router(assignments.router, prefix="/api", tags=["assignments"])
 app.include_router(auth.router, prefix="/auth", tags=["auth"])

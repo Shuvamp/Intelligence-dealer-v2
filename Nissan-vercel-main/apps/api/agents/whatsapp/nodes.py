@@ -11,12 +11,33 @@ import logging
 from datetime import datetime, timezone
 
 from .data import WhatsAppData
+from .meta_provider import MetaWhatsAppProvider
 from .mock_provider import MockWhatsAppProvider
 from .provider import get_provider
 from .state import WhatsAppState
 
 logger = logging.getLogger(__name__)
 _data = WhatsAppData()
+
+
+def _provider_for_tenant(tenant_id: str):
+    """Prefer the tenant's UI-connected creds (channel_store) over env.
+
+    When the tenant connected WhatsApp from the Channels page, page_id holds the
+    phone_number_id (mirrors facebook's use of page_id). Fall back to get_provider()
+    (env → Meta, unset → Mock) when there's no live connection.
+    """
+    try:
+        from app.services import channel_store  # app pkg is on sys.path alongside agents
+
+        row = channel_store.get(tenant_id, "whatsapp")
+        if row and row.get("status") == "connected" and row.get("access_token") and row.get("page_id"):
+            return MetaWhatsAppProvider(
+                access_token=row["access_token"], phone_number_id=row["page_id"]
+            )
+    except Exception:  # noqa: BLE001 — never break the send path on a store hiccup
+        logger.exception("channel_store lookup failed for tenant=%s — using env provider", tenant_id)
+    return get_provider()
 
 
 async def load_context_node(state: WhatsAppState) -> dict:
@@ -43,6 +64,8 @@ async def send_message_node(state: WhatsAppState) -> dict:
         phone = raw_phone  # already clean
     message = state.get("message_text", "").strip()
     attachment_id = state.get("attachment_id")
+    media_url = state.get("media_url")
+    media_type = state.get("media_type") or "image"
     errors = list(state.get("errors", []))
 
     if not phone:
@@ -54,10 +77,8 @@ async def send_message_node(state: WhatsAppState) -> dict:
         errors.append("send_failed:empty_message")
         return {"wamid": None, "provider_used": "none", "errors": errors}
 
-    provider = get_provider()
+    provider = _provider_for_tenant(state.get("tenant_id", ""))
     provider_name = type(provider).__name__.replace("WhatsAppProvider", "").lower()
-    media_url = state.get("media_url")
-    media_type = state.get("media_type") or "image"
 
     async def _send(p) -> dict:
         if media_url:

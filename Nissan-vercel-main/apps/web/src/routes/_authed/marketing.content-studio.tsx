@@ -79,6 +79,22 @@ const CHANNEL_RATIOS: Record<string, string> = {
   whatsapp:         '9/16',
 }
 
+const POSTER_DISPLAY_BASE = (
+  (import.meta.env.VITE_AGENT_API_URL as string | undefined) ?? 'http://localhost:8000'
+).replace(/\/$/, '')
+
+function posterDisplayUrl(url: string): string {
+  if (!url || url.startsWith('data:') || url.startsWith('blob:')) return url
+  try {
+    const parsed = new URL(url, typeof window !== 'undefined' ? window.location.href : 'http://localhost')
+    const idx = parsed.pathname.indexOf('/posters/')
+    if (idx >= 0) return `${POSTER_DISPLAY_BASE}${parsed.pathname.slice(idx)}${parsed.search}`
+  } catch {
+    if (url.startsWith('/posters/')) return `${POSTER_DISPLAY_BASE}${url}`
+  }
+  return url
+}
+
 // Channels shown in the Publish Channels selector + Channel Preview strip —
 // same set, kept in one place instead of duplicated per usage site.
 const MAIN_CHANNELS = ['facebook', 'instagram', 'linkedin', 'x', 'youtube']
@@ -373,8 +389,8 @@ function ContentStudio() {
   // Poster cache: item.key → URL. Initialized from loader data so existing posters show instantly.
   const [posterCache, setPosterCache] = useState<Record<string, string>>(() => {
     const init: Record<string, string> = {}
-    campaignDays.forEach(d => { if (d.poster_url) init[`${d.campaign_id}_${d.date}`] = d.poster_url })
-    monthEvents.opportunities.forEach(o => { if (o.poster_url) init[o.id ?? `${o.date}_${o.name}`] = o.poster_url })
+    campaignDays.forEach(d => { if (d.poster_url) init[`${d.campaign_id}_${d.date}`] = posterDisplayUrl(d.poster_url) })
+    monthEvents.opportunities.forEach(o => { if (o.poster_url) init[o.id ?? `${o.date}_${o.name}`] = posterDisplayUrl(o.poster_url) })
     return init
   })
   const [generatingKeys, setGeneratingKeys] = useState<Set<string>>(new Set())
@@ -399,6 +415,7 @@ function ContentStudio() {
 
   // Derived for the currently selected item.
   const currentPosterUrl = posterCache[selectedKey ?? ''] ?? null
+  const currentPosterDisplayUrl = currentPosterUrl ? posterDisplayUrl(currentPosterUrl) : null
   const currentPosterLoading = selectedKey ? generatingKeys.has(selectedKey) : false
   const currentPosterUploading = selectedKey ? posterUploading.has(selectedKey) : false
   const currentVideoUrl = videoCache[selectedKey ?? ''] ?? null
@@ -490,11 +507,12 @@ function ContentStudio() {
       const cached = posterCacheRef.current[it.key]
       // Strip query params for base-path comparison so a new ?v= timestamp
       // (written by generatePosterImage) is recognised as a new poster.
-      const dbBase = it.poster_url.split('?')[0]
+      const displayUrl = posterDisplayUrl(it.poster_url)
+      const dbBase = displayUrl.split('?')[0]
       const cachedBase = cached?.startsWith('data:') ? cached : cached?.split('?')[0]
       if (!cached || dbBase !== cachedBase) {
-        posterCacheRef.current[it.key] = it.poster_url
-        setPosterCache(prev => ({ ...prev, [it.key]: it.poster_url! }))
+        posterCacheRef.current[it.key] = displayUrl
+        setPosterCache(prev => ({ ...prev, [it.key]: displayUrl }))
       }
     })
   }, [items])
@@ -707,8 +725,9 @@ function ContentStudio() {
           path,
         },
       })
-      posterCacheRef.current[key] = url
-      setPosterCache(prev => ({ ...prev, [key]: url }))
+      const displayUrl = posterDisplayUrl(url)
+      posterCacheRef.current[key] = displayUrl
+      setPosterCache(prev => ({ ...prev, [key]: displayUrl }))
       await router.invalidate()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Poster upload failed')
@@ -786,7 +805,7 @@ function ContentStudio() {
           vehicle: selectedItem.vehicle ?? vehicle,
           mode: 'refine',
           instructions: refineText.trim(),
-          base_poster_url: currentPosterUrl,
+          base_poster_url: posterDisplayUrl(currentPosterUrl),
         },
       })
       const key = selectedItem.key
@@ -858,19 +877,19 @@ function ContentStudio() {
   // Download: real AI poster when one exists; otherwise compose a branded
   // PNG from the copy on a canvas (no external API).
   const handleDownloadPoster = async () => {
-    if (currentPosterUrl) {
+    if (currentPosterDisplayUrl) {
       const fileName = `nissan-${(selectedItem?.theme ?? vehicle).toLowerCase().replace(/[^a-z0-9]+/g, '-')}-poster.png`
       // data: URL downloads directly; cross-origin http (backend) needs blob.
-      if (currentPosterUrl.startsWith('data:')) {
-        const a = document.createElement('a'); a.download = fileName; a.href = currentPosterUrl; a.click()
+      if (currentPosterDisplayUrl.startsWith('data:')) {
+        const a = document.createElement('a'); a.download = fileName; a.href = currentPosterDisplayUrl; a.click()
       } else {
         try {
-          const blob = await fetch(currentPosterUrl).then((r) => r.blob())
+          const blob = await fetch(currentPosterDisplayUrl).then((r) => r.blob())
           const obj = URL.createObjectURL(blob)
           const a = document.createElement('a'); a.download = fileName; a.href = obj; a.click()
           URL.revokeObjectURL(obj)
         } catch {
-          window.open(currentPosterUrl, '_blank')
+          window.open(currentPosterDisplayUrl, '_blank')
         }
       }
       return
@@ -1599,12 +1618,12 @@ function ContentStudio() {
                     <p className="text-[12px] text-white/60">{currentPosterUploading ? 'Uploading your poster…' : 'Designing poster with Gemini…'}</p>
                     {!currentPosterUploading && <p className="text-[10px] text-white/35">Compositing your car onto a themed scene (~20s)</p>}
                   </div>
-                ) : currentPosterUrl ? (
+                ) : currentPosterDisplayUrl ? (
                   <div className="w-full max-w-[420px] space-y-2.5">
                     <div className="rounded-[16px] overflow-hidden border border-border shadow-md relative">
                       <img
-                    src={currentPosterUrl.startsWith('data:') ? currentPosterUrl : `${currentPosterUrl}${currentPosterUrl.includes('?') ? '&' : '?'}_cb=${Date.now()}`}
-                    key={currentPosterUrl}
+                    src={currentPosterDisplayUrl}
+                    key={currentPosterDisplayUrl}
                     alt="AI marketing poster"
                     className="w-full h-auto block"
                   />
@@ -1626,7 +1645,7 @@ function ContentStudio() {
                       />
                       <button
                         onClick={handleRefinePoster}
-                        disabled={refining || !refineText.trim() || !currentPosterUrl}
+                        disabled={refining || !refineText.trim() || !currentPosterDisplayUrl}
                         className="shrink-0 flex items-center gap-1.5 rounded-[10px] bg-[#C3002F] px-3 py-2 text-[11px] font-semibold text-white hover:bg-[#a50027] disabled:opacity-50 transition"
                       >
                         {refining ? <Loader2 className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3 w-3" />}
@@ -1806,11 +1825,11 @@ function ContentStudio() {
                   className="relative bg-[#1A1A1A] overflow-hidden"
                   style={{ aspectRatio: CHANNEL_RATIOS[channel] ?? '1/1' }}
                 >
-                  {currentPosterUrl ? (
+                  {currentPosterDisplayUrl ? (
                     // Real generated poster, cropped to this channel's frame.
                     <img
-                      src={currentPosterUrl.startsWith('data:') ? currentPosterUrl : `${currentPosterUrl}${currentPosterUrl.includes('?') ? '&' : '?'}_cb=${Date.now()}`}
-                      key={currentPosterUrl}
+                      src={currentPosterDisplayUrl}
+                      key={currentPosterDisplayUrl}
                       alt="poster"
                       className="absolute inset-0 w-full h-full object-cover"
                     />

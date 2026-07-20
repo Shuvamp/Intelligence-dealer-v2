@@ -1397,6 +1397,45 @@ export const disconnectFacebook = createServerFn({ method: 'POST' }).handler(
   },
 )
 
+// WhatsApp Business — manual-credential connect (no OAuth). Validates the creds
+// against Meta Graph server-side, then persists to channel_store.
+export const connectWhatsApp = createServerFn({ method: 'POST' })
+  .validator((d: { phone_number_id: string; access_token: string; display_name?: string }) => d)
+  .handler(async ({ data }): Promise<{ status: string; handle: string | null; verified_name: string | null }> => {
+    const supabase = getSupabaseServerClient()
+    const { tenantId } = await authCtx(supabase)
+    const response = await fetch(`${FASTAPI_URL}/api/whatsapp-channel/connect`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tenant_id: tenantId, ...data }),
+    })
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}))
+      throw new Error((err as { detail?: string }).detail ?? `Connect failed: ${response.statusText}`)
+    }
+    return response.json()
+  })
+
+export const disconnectWhatsApp = createServerFn({ method: 'POST' }).handler(
+  async (): Promise<{ status: string; message: string }> => {
+    try {
+      const supabase = getSupabaseServerClient()
+      const { tenantId } = await authCtx(supabase)
+      const response = await fetch(`${FASTAPI_URL}/api/whatsapp-channel/disconnect`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tenant_id: tenantId }),
+      })
+      if (!response.ok) {
+        throw new Error(`Disconnect failed: ${response.statusText}`)
+      }
+      return response.json() as Promise<{ status: string; message: string }>
+    } catch (e) {
+      throw new Error(`Failed to disconnect WhatsApp: ${e instanceof Error ? e.message : String(e)}`)
+    }
+  },
+)
+
 // The server-side tenant context (authCtx) isn't reachable from a plain browser
 // fetch, and YouTube's video upload needs a direct browser → FastAPI multipart
 // request (same reasoning as uploadCallRecording in lib/calls.ts — streams the
