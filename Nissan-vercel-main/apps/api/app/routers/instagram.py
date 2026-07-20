@@ -166,7 +166,7 @@ async def instagram_callback(
         logger.info("[oauth:step5] resolved @%s (ig_id=%s)", username, ig_id)
 
         # 6. Persist connection
-        channel_store.upsert(
+        await channel_store.upsert(
             tenant_id, "instagram",
             handle=f"@{username}" if username else None,
             instagram_id=ig_id,
@@ -198,7 +198,7 @@ async def instagram_callback(
 @router.get("/status")
 async def instagram_status(tenant_id: str = Query(...)):
     """Return the current Instagram connection status for a tenant."""
-    row = channel_store.get(tenant_id, "instagram")
+    row = await channel_store.get(tenant_id, "instagram")
     if not row:
         return {"connected": False, "handle": None, "last_sync": None}
     return {
@@ -217,7 +217,7 @@ async def instagram_sync(req: SyncRequest):
     Update the last_sync timestamp for a tenant's Instagram connection.
     Returns 404 if no active connection exists.
     """
-    row = channel_store.get(req.tenant_id, "instagram")
+    row = await channel_store.get(req.tenant_id, "instagram")
     if not row:
         raise HTTPException(status_code=404, detail="No Instagram connection found")
     if row.get("status") != "connected":
@@ -226,7 +226,7 @@ async def instagram_sync(req: SyncRequest):
         raise HTTPException(status_code=401, detail="Access token missing or expired — please reconnect")
 
     now = datetime.now(timezone.utc).isoformat()
-    channel_store.update(req.tenant_id, "instagram", last_sync=now)
+    await channel_store.update(req.tenant_id, "instagram", last_sync=now)
     return {"status": "success", "last_sync": now}
 
 
@@ -254,7 +254,7 @@ async def instagram_insights(
         "topPosts": [], "posts": [],
     }
 
-    row = channel_store.get(tenant_id, "instagram")
+    row = await channel_store.get(tenant_id, "instagram")
     if not row or row.get("status") != "connected" or not row.get("access_token"):
         return empty
 
@@ -315,7 +315,7 @@ async def instagram_comments(tenant_id: str = Query(...), media_id: str = Query(
     """On-demand comment text list for one post — not batched into /insights
     (avoids an N+1 Graph API call per post on every dashboard load/poll tick).
     Called when a user expands a specific post on the dashboard."""
-    row = channel_store.get(tenant_id, "instagram")
+    row = await channel_store.get(tenant_id, "instagram")
     if not row or row.get("status") != "connected" or not row.get("access_token"):
         raise HTTPException(status_code=400, detail="Instagram is not connected")
     comments = await get_media_comments(media_id, row["access_token"])
@@ -330,7 +330,7 @@ class RefreshAnalyticsRequest(BaseModel):
 async def instagram_refresh_analytics(req: RefreshAnalyticsRequest):
     """Manually run one analytics poll for a single tenant (the dashboard's
     "Refresh analytics" button) instead of waiting for the next scheduled tick."""
-    row = channel_store.get(req.tenant_id, "instagram")
+    row = await channel_store.get(req.tenant_id, "instagram")
     if not row or row.get("status") != "connected" or not row.get("access_token"):
         raise HTTPException(status_code=400, detail="Instagram is not connected")
     from app.services.instagram_analytics_poller import refresh_tenant
@@ -345,10 +345,10 @@ async def instagram_refresh_analytics(req: RefreshAnalyticsRequest):
 @router.post("/disconnect")
 async def instagram_disconnect(req: DisconnectRequest):
     """Deactivate a channel connection — clears the token and marks it disconnected."""
-    row = channel_store.get(req.tenant_id, req.channel_id)
+    row = await channel_store.get(req.tenant_id, req.channel_id)
     if not row:
         raise HTTPException(status_code=404, detail=f"No {req.channel_id} connection found")
-    channel_store.update(req.tenant_id, req.channel_id, status="disconnected", access_token="")
+    await channel_store.update(req.tenant_id, req.channel_id, status="disconnected", access_token="")
     return {"status": "success", "message": f"{req.channel_id} disconnected"}
 
 

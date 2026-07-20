@@ -5,14 +5,12 @@ import os
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import AsyncIterator
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse, FileResponse
-from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from dotenv import load_dotenv
 
@@ -42,7 +40,7 @@ from agents.call_intelligence.service import (
 from agents.call_intelligence.data import CallData
 from agents.events import bus, DomainEvent, EventType  # Phase 7 — event bus
 
-from app.routers import marketing, instagram, auth, linkedin, youtube, facebook, channels, publish, context_planner, website_extraction, company_summary, seo_agent, aeo_agent, recommendation_engine, report_generator, marketing_strategy, marketing_budget_planner, whatsapp_channel
+from app.routers import marketing, instagram, auth, linkedin, youtube, facebook, channels, publish, context_planner, website_extraction, company_summary, seo_agent, aeo_agent, recommendation_engine, report_generator, marketing_strategy, marketing_budget_planner, whatsapp_channel, assignments
 from app.routers import db as db_router
 
 # GROQ_API_KEY (and the rest of apps/api/.env) is read ONCE here at startup.
@@ -51,11 +49,6 @@ from app.routers import db as db_router
 load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-POSTERS_DIR = Path(__file__).resolve().parent / "generated" / "posters"
-POSTERS_DIR.mkdir(parents=True, exist_ok=True)
-VIDEOS_DIR = Path(__file__).resolve().parent / "generated" / "videos"
-VIDEOS_DIR.mkdir(parents=True, exist_ok=True)
 
 app = FastAPI(title="ADIP API", version="0.1.0")
 
@@ -80,6 +73,7 @@ app.include_router(facebook.router, prefix="/api/facebook", tags=["facebook"])
 app.include_router(channels.router, prefix="/api/channels", tags=["channels"])
 app.include_router(whatsapp_channel.router, prefix="/api/whatsapp-channel", tags=["whatsapp-channel"])
 app.include_router(publish.router, prefix="/api/publish", tags=["publish"])
+app.include_router(assignments.router, prefix="/api", tags=["assignments"])
 app.include_router(auth.router, prefix="/auth", tags=["auth"])
 app.include_router(context_planner.router, prefix="/context-planner", tags=["context-planner"])
 app.include_router(website_extraction.router, prefix="/website-extraction", tags=["website-extraction"])
@@ -90,9 +84,6 @@ app.include_router(recommendation_engine.router, prefix="/recommendation-engine"
 app.include_router(report_generator.router, prefix="/report-generator", tags=["report-generator"])
 app.include_router(marketing_strategy.router, prefix="/marketing-strategy", tags=["marketing-strategy"])
 app.include_router(marketing_budget_planner.router, prefix="/marketing-budget-planner", tags=["marketing-budget-planner"])
-
-app.mount("/posters", StaticFiles(directory=str(POSTERS_DIR)), name="posters")
-app.mount("/videos", StaticFiles(directory=str(VIDEOS_DIR)), name="videos")
 
 # ---------------------------------------------------------------------------
 # Supabase / tenant constants
@@ -183,10 +174,8 @@ def _broadcast_lead(lead_data: dict) -> None:
 
 
 # Lead Board UI (Phase 2) — mirrors _broadcast_lead's pattern for stage moves.
-# Today the web app's EventSource connects to the shim (apps/local-api),
-# which has its own equivalent POST /events/stage-change — this FastAPI
-# endpoint exists for parity/consistency, not because anything calls it yet
-# in the current local-dev wiring.
+# This FastAPI endpoint exists for parity/consistency, not because anything
+# calls it yet in the current local-dev wiring.
 def _broadcast_stage_change(data: dict) -> None:
     msg = f"event: stage_change\ndata: {json.dumps(data)}\n\n"
     dead: set[asyncio.Queue] = set()
@@ -328,8 +317,6 @@ async def _stop_auto_publisher() -> None:
             await _publisher_task
         except (asyncio.CancelledError, Exception):  # noqa: BLE001
             pass
-    from app.db import duckdb as _duckdb
-    _duckdb.close_all()
 
 
 _linkedin_analytics_task: asyncio.Task | None = None
@@ -543,8 +530,7 @@ async def workflow(lead_id: str, body: WorkflowRequest = WorkflowRequest()):
     """Run the Workflow Agent for a lead: decide the next action(s) from its
     score/classification/history, persist a workflow_actions record + a
     lead_tasks row per action + a timeline entry, and escalate to a manager
-    if hot. Auto-triggered after intake (see apps/local-api/server.js's
-    triggerWorkflowAgent); also callable on demand."""
+    if hot. Auto-triggered after intake; also callable on demand."""
     execution_id = str(uuid.uuid4())
     try:
         result = await run_workflow_agent(
@@ -664,8 +650,8 @@ def _followup_steps(s: dict) -> list[dict]:
 async def score(body: NormalizedLeadRequest):
     """
     Run the full Python LangGraph scoring agent on a pipeline normalized lead.
-    Called by apps/local-api score.node.js. Returns the agent's complete
-    final_output (all dimensions, reasoning, flags) — nothing dropped.
+    Returns the agent's complete final_output (all dimensions, reasoning,
+    flags) — nothing dropped.
     """
     scoring_input = normalized_to_scoring_input(body.model_dump())
 

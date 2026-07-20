@@ -57,6 +57,15 @@ def _strip_fences(text: str) -> str:
     return text
 
 
+def _extract_json_object(text: str) -> str:
+    """Grab the first {...} span — some providers prefix JSON with prose."""
+    start = text.find("{")
+    end = text.rfind("}")
+    if start != -1 and end != -1 and end > start:
+        return text[start : end + 1]
+    return text
+
+
 def _claude(
     user_prompt: str,
     system: str | None,
@@ -168,7 +177,7 @@ def llm_json(
     if not text:
         return None
     try:
-        return json.loads(_strip_fences(text))
+        return json.loads(_extract_json_object(_strip_fences(text)))
     except Exception:
         logger.warning("[llm] JSON parse failed — text=%r", text[:300])
         return None

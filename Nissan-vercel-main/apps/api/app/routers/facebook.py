@@ -165,7 +165,7 @@ async def facebook_callback(
 
         # 4. Persist connection — same channel_store every other channel uses.
         try:
-            channel_store.upsert(
+            await channel_store.upsert(
                 tenant_id, "facebook",
                 handle=page_name or None,
                 page_id=page_id,
@@ -240,7 +240,7 @@ if (window.opener && !window.opener.closed) {{
 @router.get("/status")
 async def facebook_status(tenant_id: str = Query(...)):
     """Return the current Facebook connection status for a tenant."""
-    row = channel_store.get(tenant_id, "facebook")
+    row = await channel_store.get(tenant_id, "facebook")
     if not row or row.get("status") != "connected":
         return {"connected": False, "handle": None, "last_sync": None, "page_id": None, "page_name": None}
     return {
@@ -259,9 +259,9 @@ class DisconnectRequest(BaseModel):
 @router.post("/disconnect")
 async def facebook_disconnect(req: DisconnectRequest):
     """Deactivate the connection — clears the token and marks it disconnected."""
-    row = channel_store.get(req.tenant_id, "facebook")
+    row = await channel_store.get(req.tenant_id, "facebook")
     if not row:
         raise HTTPException(status_code=404, detail="No Facebook connection found")
-    channel_store.update(req.tenant_id, "facebook", status="disconnected", access_token="")
+    await channel_store.update(req.tenant_id, "facebook", status="disconnected", access_token="")
     logger.info("[facebook:disconnect] tenant=%s", req.tenant_id)
     return {"status": "success", "message": "Facebook disconnected"}

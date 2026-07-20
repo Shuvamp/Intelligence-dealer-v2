@@ -12,6 +12,8 @@ load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 SUPABASE_URL: str = os.getenv("SUPABASE_URL", "http://localhost:54321")
 SUPABASE_SERVICE_KEY: str = os.getenv("SUPABASE_SERVICE_KEY", "")
+SUPABASE_POSTERS_BUCKET: str = os.getenv("SUPABASE_POSTERS_BUCKET", "posters")
+SUPABASE_VIDEOS_BUCKET: str = os.getenv("SUPABASE_VIDEOS_BUCKET", "videos")
 CALENDARIFIC_API_KEY: str = os.getenv("CALENDARIFIC_API_KEY", "")
 GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
 GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-2.5-flash-lite")

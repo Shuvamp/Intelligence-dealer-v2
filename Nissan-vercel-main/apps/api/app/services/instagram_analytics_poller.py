@@ -82,7 +82,7 @@ async def refresh_tenant(tenant_id: str, connection: dict) -> None:
 
 
 async def _tick() -> None:
-    connections = await asyncio.to_thread(channel_store.list_connected, "instagram")
+    connections = await channel_store.list_connected("instagram")
     if not connections:
         logger.debug("[instagram:analytics] tick — no connected Instagram accounts")
         return

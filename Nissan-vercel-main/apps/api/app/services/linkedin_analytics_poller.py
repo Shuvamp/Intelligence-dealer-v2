@@ -136,7 +136,7 @@ async def refresh_tenant(tenant_id: str, connection: dict) -> None:
 
 
 async def _tick() -> None:
-    connections = await asyncio.to_thread(channel_store.list_connected, "linkedin")
+    connections = await channel_store.list_connected("linkedin")
     if not connections:
         logger.debug("[linkedin:analytics] tick — no connected LinkedIn accounts")
         return

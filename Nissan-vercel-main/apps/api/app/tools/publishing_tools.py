@@ -5,12 +5,11 @@ Each function is a discrete, testable unit that wraps an existing service.
 No business logic lives here — tools are thin, named operations the agent
 calls by name in its reasoning loop.
 
-Async tools use asyncio.to_thread() for sync DB / channel-store calls so the
-agent's ainvoke() path stays fully non-blocking.
+db.py and channel_store.py are natively async (Supabase over httpx), so
+tools await them directly — no to_thread() needed.
 """
 from __future__ import annotations
 
-import asyncio
 import base64
 import logging
 from typing import Optional
@@ -42,7 +41,7 @@ async def get_due_posts_tool() -> list[dict]:
     now_iso() adds +5:30 without any timezone library.
     """
     now   = db.now_iso()
-    posts = await asyncio.to_thread(db.list_due_posts, now)
+    posts = await db.list_due_posts(now)
     logger.info("[tool:get_due_posts] %d post(s) due at %s", len(posts), now)
     return posts
 
@@ -66,7 +65,7 @@ async def group_targets_tool(
     """
     tenant_id = post.get("tenant_id", "")
     try:
-        rows = await asyncio.to_thread(channel_store.list_for_tenant, tenant_id)
+        rows = await channel_store.list_for_tenant(tenant_id)
     except Exception:
         logger.exception("[tool:group_targets] channel_store failed tenant=%s", tenant_id)
         return []
@@ -160,7 +159,7 @@ async def publish_linkedin_tool(post: dict, poster: Optional[dict]) -> dict:
     {"status": "skipped", "reason": "not_connected"} when disconnected.
     """
     tenant_id = post.get("tenant_id", "")
-    row = await asyncio.to_thread(channel_store.get, tenant_id, "linkedin")
+    row = await channel_store.get(tenant_id, "linkedin")
     if not (row and row.get("status") == "connected" and row.get("access_token")):
         logger.info("[tool:publish_linkedin] not_connected tenant=%s", tenant_id)
         return {"status": "skipped", "reason": "not_connected"}
@@ -219,7 +218,7 @@ async def publish_youtube_tool(post: dict) -> dict:
     {"status": "error", "error": "..."}.
     """
     tenant_id = post.get("tenant_id", "")
-    row = await asyncio.to_thread(channel_store.get, tenant_id, "youtube")
+    row = await channel_store.get(tenant_id, "youtube")
     if not (row and row.get("status") == "connected" and row.get("access_token")):
         logger.info("[tool:publish_youtube] not_connected tenant=%s", tenant_id)
         return {"status": "skipped", "reason": "not_connected"}
@@ -254,7 +253,7 @@ async def publish_instagram_tool(post: dict, poster: Optional[dict]) -> dict:
     {"status": "skipped", "reason": "not_connected" | "image_required" | "image_url_required"}.
     """
     tenant_id = post.get("tenant_id", "")
-    row = await asyncio.to_thread(channel_store.get, tenant_id, "instagram")
+    row = await channel_store.get(tenant_id, "instagram")
     if not (row and row.get("status") == "connected" and row.get("access_token")):
         logger.info("[tool:publish_instagram] not_connected tenant=%s", tenant_id)
         return {"status": "skipped", "reason": "not_connected"}
@@ -312,7 +311,7 @@ async def publish_facebook_tool(post: dict, poster: Optional[dict]) -> dict:
     {"status": "skipped", "reason": "not_connected"} when disconnected.
     """
     tenant_id = post.get("tenant_id", "")
-    row = await asyncio.to_thread(channel_store.get, tenant_id, "facebook")
+    row = await channel_store.get(tenant_id, "facebook")
     if not (row and row.get("status") == "connected" and row.get("access_token")):
         logger.info("[tool:publish_facebook] not_connected tenant=%s", tenant_id)
         return {"status": "skipped", "reason": "not_connected"}
@@ -369,8 +368,7 @@ async def update_status_tool(
     app/agents/publishing_agent.py's _update_status, which decides this from
     the accumulated post_results before calling here.
     """
-    await asyncio.to_thread(
-        db.set_publish_status,
+    await db.set_publish_status(
         kind, group_id, tenant_id, status, day_date, published_at, channel_status,
     )
     logger.info("[tool:update_status] %s:%s → %s", kind, group_id, status)

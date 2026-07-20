@@ -90,7 +90,7 @@ async def youtube_callback(
         connected_at = datetime.now(timezone.utc).isoformat()
 
         try:
-            channel_store.upsert(
+            await channel_store.upsert(
                 tenant_id, "youtube",
                 handle=channel["title"] or None,
                 youtube_channel_id=channel["id"],
@@ -153,7 +153,7 @@ if (window.opener && !window.opener.closed) {{
 
 @router.get("/status")
 async def youtube_status(tenant_id: str = Query(...)):
-    row = channel_store.get(tenant_id, "youtube")
+    row = await channel_store.get(tenant_id, "youtube")
     if not row or row.get("status") != "connected":
         return {"connected": False, "handle": None, "last_sync": None, "channel_id": None, "channel_name": None}
     return {
@@ -171,11 +171,11 @@ class DisconnectRequest(BaseModel):
 
 @router.post("/disconnect")
 async def youtube_disconnect(req: DisconnectRequest):
-    row = channel_store.get(req.tenant_id, "youtube")
+    row = await channel_store.get(req.tenant_id, "youtube")
     if not row:
         raise HTTPException(status_code=404, detail="No YouTube connection found")
     await revoke_token(row.get("access_token") or row.get("refresh_token") or "")
-    channel_store.update(req.tenant_id, "youtube", status="disconnected", access_token="", refresh_token="")
+    await channel_store.update(req.tenant_id, "youtube", status="disconnected", access_token="", refresh_token="")
     return {"status": "success", "message": "YouTube disconnected"}
 
 
@@ -194,7 +194,7 @@ async def youtube_publish(
     if video is None:
         raise HTTPException(status_code=400, detail="video file is required")
 
-    row = channel_store.get(tenant_id, "youtube")
+    row = await channel_store.get(tenant_id, "youtube")
     if not row or row.get("status") != "connected" or not row.get("access_token"):
         raise HTTPException(status_code=400, detail="YouTube is not connected")
 
@@ -226,6 +226,6 @@ async def youtube_publish(
         logger.warning("[youtube:publish] could not record video %s", result["video_id"])
 
     now = datetime.now(timezone.utc).isoformat()
-    channel_store.update(tenant_id, "youtube", last_sync=now)
+    await channel_store.update(tenant_id, "youtube", last_sync=now)
 
     return {"status": "success", "video_id": result["video_id"], "video_url": result["video_url"]}
