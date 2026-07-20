@@ -3,35 +3,20 @@
 Multi-tenant dealership intelligence platform (Agentic Dealership Intelligence Platform).
 See `docs/specs/` for the design and `docs/superpowers/plans/` for implementation plans.
 
-## Quick start (real Supabase — only supported path)
+## Quick start (hosted Supabase — only supported path)
 
 ### Prerequisites
-- A container runtime — **colima** (`brew install colima docker`, then `colima start`)
-- Supabase CLI (`brew install supabase/tap/supabase`)
+- A hosted Supabase project (migrations in `supabase/migrations/` applied via the SQL Editor or `supabase db push`)
+- `apps/web/.env.local` and `apps/api/.env` filled in with that project's URL + keys (see `.env.example` files)
 
-### Run the data layer
+### Run the app
 ```bash
-colima start                          # start the local container runtime
-supabase start                        # boot local Postgres + Auth + Studio
-supabase db reset                     # apply migrations + seed (wipes auth users)
-python3 scripts/seed_demo_users.py    # create demo login accounts (run after reset)
-supabase test db                      # run RLS isolation tests
-npm run setup                         # installs deps + writes apps/web/.env.local from `supabase status`
+npm run setup                         # installs root + apps/web deps
+npm run setup:agent                   # creates apps/api/.venv + installs FastAPI agent deps
 npm run dev                           # starts the web app (:3000) and FastAPI agents (:8000)
 ```
-Studio: http://localhost:54323
 
-Open **http://localhost:3000** and log in with a demo account (password `Passw0rd!23`):
-`owner@abcnissan.test`, `manager@abcnissan.test`, or `sales@xyznissan.test`.
-
-### Demo accounts (password `Passw0rd!23`)
-| Email | Dealer | Role |
-|---|---|---|
-| `owner@abcnissan.test` | ABC Nissan | dealer_owner |
-| `manager@abcnissan.test` | ABC Nissan | dealer_manager |
-| `sales@xyznissan.test` | XYZ Nissan | sales_executive |
-
-`auth.users` is wiped by `supabase db reset`, so re-run the seeder after each reset (it's idempotent).
+Open **http://localhost:3000** and sign in with a real account (create one via Supabase Auth in the dashboard, or the app's sign-up flow).
 
 ## Structure
 ```

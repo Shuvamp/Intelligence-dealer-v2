@@ -55,60 +55,26 @@ Supabase — PostgreSQL + Auth + Storage
 
 ## 3. Run it locally
 
-### Option A — DuckDB (recommended, no Docker) ⚡
+Only supported path: a **hosted Supabase project** (no Docker, no local stack).
 
-The fastest path. A local DuckDB server (`apps/local-api`) speaks Supabase's API, so you
-**don't need Docker, colima, or the Supabase CLI** — just **Node 20+**. The web app runs
-unchanged; only its `VITE_SUPABASE_URL` points at the local server.
-
-```bash
-git clone https://github.com/muthukumarp-dm/adip.git
-cd adip
-npm run setup     # installs all deps + auto-writes apps/web/.env.local (points at the local API)
-npm run dev       # starts the DuckDB API (:54321) and the web app (:3000) together
-```
-
-That's it — open **http://localhost:3000**. Data is seeded in-memory on each restart. See
-[`apps/local-api/README.md`](../apps/local-api/README.md) for what it implements and how to
-extend it. **Caveat:** the shim does **not** enforce RLS — verify tenant-isolation behavior
-(§8) against real Supabase (Option B) before relying on it.
-
-### Option B — real Supabase (production parity)
-
-Use this when you need RLS, migrations, Studio, or pgTAP tests.
-
-**Prerequisites:** a container runtime (`brew install colima docker`), Supabase CLI
-(`brew install supabase/tap/supabase`), Node 20+.
+**Prerequisites:** a hosted Supabase project, with `supabase/migrations/` applied
+(SQL Editor or `supabase db push`); Node 20+; Python 3.12 + `uv` for the agent service.
 
 ```bash
 git clone https://github.com/muthukumarp-dm/adip.git
 cd adip
+npm run setup          # installs root + apps/web deps
+npm run setup:agent    # creates apps/api/.venv + installs FastAPI agent deps
 
-# 1. Backend (local Supabase in a container)
-colima start
-supabase start
-supabase db reset                      # applies all migrations + seed.sql
-python3 scripts/seed_demo_users.py     # creates demo users + leads/marketing/copilot data
+# fill in apps/web/.env.local and apps/api/.env with the hosted project's URL + keys
+# (see the .env.example files in each)
 
-# 2. Frontend
-cd apps/web
-cp .env.example .env                   # local Supabase URL + anon key (defaults are correct)
-npm install
-npm run dev                            # http://localhost:3000
+npm run dev            # starts web (:3000) and the FastAPI agents (:8000)
 ```
 
-Open **http://localhost:3000**. Demo accounts (password `Passw0rd!23`):
-
-| Email | Dealer | Role |
-|---|---|---|
-| `owner@abcnissan.test` | ABC Nissan (Intelligence plan — all modules) | Owner |
-| `manager@abcnissan.test` | ABC Nissan | Manager |
-| `sales@xyznissan.test` | XYZ Nissan (Growth plan — Intelligence/Copilot locked) | Sales Executive |
-
-Log in as both ABC and XYZ to see **tenant isolation** and **plan gating** in action.
-
-**Optional — turn on real AI:** put `ANTHROPIC_API_KEY=sk-ant-...` in `apps/web/.env`, restart `npm run dev`.
-Without it, the AI agents use template fallbacks and the demo still works.
+Open **http://localhost:3000** and sign in with a real account (create one via
+Supabase Auth in the dashboard, or the app's sign-up flow). RLS is enforced —
+tenant-isolation behavior matches production.
 
 ---
 
@@ -180,8 +146,8 @@ Make the foundation real and verified first, then build the pages on top.
 
 - `cd apps/web && npx tsc --noEmit` must be clean (0 errors).
 - Verify in a **real browser**: log in, exercise your feature, and confirm **tenant isolation**
-  (log in as XYZ — you must only see XYZ data). The `apps/web/scripts/verify-*.mjs` Playwright scripts
-  show the pattern.
+  (log in as a second tenant's account — you must only see that tenant's data). The
+  `apps/web/scripts/verify-*.mjs` Playwright scripts show the pattern.
 - Don't merge with failing types or a broken login.
 
 ---

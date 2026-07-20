@@ -10,7 +10,7 @@ async function login(page, email) {
   await page.waitForSelector('input[type=email]', { timeout: 15000 })
   await page.waitForTimeout(1500) // let the client hydrate so the React submit runs
   await page.fill('input[type=email]', email)
-  await page.fill('input[type=password]', 'Passw0rd!23')
+  await page.fill('input[type=password]', (process.env.VERIFY_PASSWORD || 'Passw0rd!23'))
   await page.click('button:has-text("Sign in")')
   await page.waitForURL('**/dashboard', { timeout: 20000 })
   await page.waitForSelector('h1', { timeout: 15000 })
@@ -37,7 +37,7 @@ page.on('requestfailed', (r) => {
 
 try {
   // 1. ABC owner
-  await login(page, 'owner@abcnissan.test')
+  await login(page, (process.env.VERIFY_EMAIL || 'owner@abcnissan.test'))
   const greeting = await page.locator('h1').first().innerText()
   const tenantName = await page.locator('header >> text=ABC Nissan').first().isVisible().catch(() => false)
   await page.screenshot({ path: OUT + '01-dashboard-abc.png', fullPage: true })
@@ -49,7 +49,7 @@ try {
   await page.goto('http://localhost:3000/dashboard', { waitUntil: 'domcontentloaded' })
   await page.click('button[aria-label="Sign out"]')
   await page.waitForURL('**/login', { timeout: 15000 })
-  await login(page, 'sales@xyznissan.test')
+  await login(page, (process.env.VERIFY_EMAIL_2 || 'sales@xyznissan.test'))
   await page.screenshot({ path: OUT + '04-dashboard-xyz.png', fullPage: true })
   const xyzRows = await customers(page)
   await page.screenshot({ path: OUT + '03-customers-xyz.png', fullPage: true })

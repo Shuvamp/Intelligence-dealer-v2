@@ -28,21 +28,14 @@ function flatten(row: any): Lead {
 
 const sum = (rows: Array<Lead>) => rows.reduce((t, l) => t + (l.budget ?? 0), 0)
 
-// Demo/local bypass: login is stubbed (see lib/auth.ts — signIn sets no session
-// cookie, getSessionUser returns a hardcoded owner). So server-side there is no
-// real Supabase session, and auth.getUser() returns null. Fall back to the
-// seeded ABC Nissan owner so board mutations (stage move, assign, notes) work in
-// local dev instead of throwing. With a real session, the real user wins.
-const DEMO_OWNER_ID = 'user-owner-abc-0001-000000000001'
-const DEMO_TENANT_ID = '11111111-1111-1111-1111-111111111111'
-
 async function authCtx(supabase: ReturnType<typeof getSupabaseServerClient>) {
   const {
     data: { user },
   } = await supabase.auth.getUser()
-  if (!user) return { userId: DEMO_OWNER_ID, tenantId: DEMO_TENANT_ID }
+  if (!user) throw new Error('Not authenticated')
   const { data } = await supabase.from('users').select('tenant_id').eq('id', user.id).single()
-  return { userId: user.id, tenantId: (data?.tenant_id as string) ?? DEMO_TENANT_ID }
+  if (!data?.tenant_id) throw new Error('User has no tenant')
+  return { userId: user.id, tenantId: data.tenant_id as string }
 }
 
 // ---- reads ----
@@ -158,7 +151,7 @@ export const updateLeadStage = createServerFn({ method: 'POST' })
     // refresh in real time. Never let a broadcast failure fail the mutation
     // itself — the DB write above is already done and is the source of truth.
     try {
-      const apiUrl = process.env.VITE_SUPABASE_URL ?? 'http://localhost:54321'
+      const apiUrl = process.env.VITE_AGENT_API_URL ?? 'http://localhost:8000'
       await fetch(`${apiUrl}/events/stage-change`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

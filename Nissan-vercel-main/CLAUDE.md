@@ -11,7 +11,7 @@ Multi-tenant SaaS: the operating system for car dealerships. Phase 1 customer: N
 - **Frontend:** TanStack Start (React) — `apps/web`
 - **Backend API:** FastAPI (Python) — `apps/api`
 - **AI / Agents:** LangGraph (Python) — `apps/api/agents/`
-- **Dev DB:** local Supabase (`supabase start`) — same as prod
+- **Dev DB:** hosted Supabase project — same one used in prod
 - **Prod DB:** Supabase PostgreSQL
 
 > **Rule:** All new backend APIs and AI agents MUST use FastAPI + Python LangGraph.
@@ -54,18 +54,17 @@ customer named a rival, it weaves in 1–2 Nissan advantages without naming the 
 - UI: the **"Generate follow-up"** button on the lead detail page (`/leads/$leadId`) → server fn
   `runFollowup` (`apps/web/src/lib/followup.ts`) → the endpoint; the NBA event then shows in the timeline.
 
-## Local dev — real Supabase (only supported path)
-- Container runtime: **colima** (`colima start`), Docker CLI client.
-- `supabase start` boots the local stack. Migrations in `supabase/migrations/`. Seed in `supabase/seed.sql`.
-- `supabase db reset` re-applies migrations + seed. `supabase test db` runs pgTAP tests.
-- Studio: http://localhost:54323
+## Local dev — hosted Supabase (only supported path)
+- No Docker, no local stack. Migrations in `supabase/migrations/`, applied to the hosted
+  project via the SQL Editor or `supabase db push`.
 
 ```bash
-supabase start        # once per boot: local Postgres + Auth + PostgREST + Storage
-npm run setup          # installs root + apps/web deps; writes apps/web/.env.local from `supabase status`
+npm run setup          # installs root + apps/web deps
 npm run setup:agent    # once: creates apps/api/.venv + installs FastAPI agent deps (needs Python 3.12 + uv)
-npm run dev            # starts web (:3000) + FastAPI agents (:8000) against local Supabase
+npm run dev            # starts web (:3000) + FastAPI agents (:8000) against the hosted project
 ```
-- `apps/web/.env.local` is auto-generated from `supabase status -o env` (real local `API_URL`/`ANON_KEY`).
-- Demo logins (password `Passw0rd!23`): `owner@abcnissan.test`, `manager@abcnissan.test`, `sales@xyznissan.test`.
+- Fill in `apps/web/.env.local` and `apps/api/.env` with the hosted project's URL + keys
+  (see the `.env.example` files).
+- Sign in with a real account (create one via Supabase Auth in the dashboard, or the app's
+  sign-up flow).
 - RLS is enforced — tenant-isolation behavior matches production.

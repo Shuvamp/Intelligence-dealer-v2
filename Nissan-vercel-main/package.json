@@ -3,9 +3,9 @@
   "private": true,
   "description": "ADIP — Dealer Intelligence OS. Root scripts for local development.",
   "scripts": {
-    "setup": "npm install && npm --prefix apps/web install && node scripts/local-env.mjs",
+    "setup": "npm install && npm --prefix apps/web install",
     "setup:agent": "python -m uv venv apps/api/.venv && python -m uv pip install --python apps/api/.venv -r apps/api/requirements.txt",
-    "dev": "node scripts/local-env.mjs && concurrently --restart-tries 20 --restart-after 1500 -n web,agent -c cyan,green \"npm --prefix apps/web run dev\" \"npm run dev:agent\"",
+    "dev": "concurrently --restart-tries 20 --restart-after 1500 -n web,agent -c cyan,green \"npm --prefix apps/web run dev\" \"npm run dev:agent\"",
     "dev:agent": "apps\\api\\.venv\\Scripts\\python -m uvicorn main:app --app-dir apps/api --port 8000 --reload",
     "dev:web": "npm --prefix apps/web run dev",
     "build": "npm --prefix apps/web run build"

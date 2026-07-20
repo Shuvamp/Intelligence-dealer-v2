@@ -79,8 +79,8 @@ META_APP_SECRET=your_app_secret_from_meta_dashboard
 META_REDIRECT_URI=http://localhost:8000/api/instagram/callback
 META_API_VERSION=v20.0
 
-# Supabase (example for local dev)
-SUPABASE_URL=http://127.0.0.1:54321
+# Supabase — the hosted project's URL + service key (from apps/api/.env)
+SUPABASE_URL=your_hosted_project_url
 SUPABASE_SERVICE_KEY=your_service_role_key
 ```
 
@@ -91,14 +91,8 @@ SUPABASE_SERVICE_KEY=your_service_role_key
 
 ### 5. Database Migration
 
-Run the migration to create the `social_channel_connections` table:
-
-```bash
-cd supabase
-supabase migration up
-# or
-supabase db reset  # (includes all migrations)
-```
+Apply the migration to your hosted Supabase project (via the SQL Editor or `supabase db push`)
+to create the `social_channel_connections` table.
 
 This creates:
 - `social_channel_connections` table with RLS policies
@@ -118,16 +112,12 @@ No new packages needed!
 ### 7. Start Services
 
 ```bash
-# Terminal 1: Start Supabase (if using local dev)
-cd supabase
-supabase start
-
-# Terminal 2: Start FastAPI backend
+# Terminal 1: Start FastAPI backend (against the hosted Supabase project)
 cd apps/api
 python main.py
 # or: uvicorn main:app --reload
 
-# Terminal 3: Start React frontend
+# Terminal 2: Start React frontend
 cd apps/web
 npm run dev
 ```

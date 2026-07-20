@@ -152,18 +152,17 @@ META_APP_SECRET=your_app_secret_here
 META_REDIRECT_URI=http://localhost:8000/api/instagram/callback
 META_API_VERSION=v20.0
 
-# Keep existing Supabase settings
-SUPABASE_URL=http://127.0.0.1:54321
+# Keep existing Supabase settings (hosted project URL/key from apps/api/.env.example)
+SUPABASE_URL=https://your-project.supabase.co
 SUPABASE_SERVICE_KEY=...
 ```
 
 ### Step 5: Database Migration
 
+Apply the migration to the hosted project via the Supabase SQL Editor, or:
+
 ```bash
-cd supabase
-supabase db reset
-# OR
-supabase migration up
+supabase db push
 ```
 
 This creates the `social_channel_connections` table with RLS policies.

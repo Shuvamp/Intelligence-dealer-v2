@@ -5,6 +5,7 @@ import os
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import AsyncIterator
 
 import httpx
@@ -13,6 +14,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse, FileResponse
 from pydantic import BaseModel
 from dotenv import load_dotenv
+
+# Load apps/api/.env BEFORE any agents/app import below — several of those
+# modules read env vars (SUPABASE_URL etc.) at module import time, so .env
+# must be loaded first. Path-anchored (not a bare load_dotenv()) since CWD
+# is the repo root under `npm run dev`, not apps/api.
+load_dotenv(Path(__file__).resolve().parent / ".env")
 
 from agents.lead_validator.graph import lead_validator
 from agents.lead_validator.state import LeadInput
@@ -43,17 +50,16 @@ from agents.events import bus, DomainEvent, EventType  # Phase 7 — event bus
 from app.routers import marketing, instagram, auth, linkedin, youtube, facebook, channels, publish, context_planner, website_extraction, company_summary, seo_agent, aeo_agent, recommendation_engine, report_generator, marketing_strategy, marketing_budget_planner, assignments
 from app.routers import db as db_router
 
-# GROQ_API_KEY (and the rest of apps/api/.env) is read ONCE here at startup.
+# GROQ_API_KEY (and the rest of apps/api/.env) is read ONCE at import time above.
 # uvicorn --reload only watches .py files, so after editing .env you must
 # restart the agent service (or touch a .py file) for a new key to take effect.
-load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="ADIP API", version="0.1.0")
 
-# Allow the web app (and the DuckDB shim) to call the agent API directly from the
-# browser — needed for the EventSource follow-up stream (GET /followup/{id}/stream).
+# Allow the web app to call the agent API directly from the browser — needed
+# for the EventSource follow-up stream (GET /followup/{id}/stream).
 app.add_middleware(
     CORSMiddleware,
     # Allow all origins in development — FastAPI is only reachable from localhost
@@ -87,8 +93,8 @@ app.include_router(marketing_budget_planner.router, prefix="/marketing-budget-pl
 # ---------------------------------------------------------------------------
 # Supabase / tenant constants
 # ---------------------------------------------------------------------------
-SUPABASE_URL = os.getenv("SUPABASE_URL", "http://localhost:54321")
-SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_KEY", "local-dev-anon-key")
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_KEY")
 ABC_TENANT_ID = "11111111-1111-1111-1111-111111111111"
 LOC_VEL_ID = "aaaaaaaa-0000-0000-0000-000000000001"
 
@@ -931,10 +937,9 @@ async def stage_change_event(body: StageChangeEvent):
 
 # SSE broadcast for delivery status updates.
 # Unlike workflow_action (which is made+broadcast in the same request), delivery
-# status arrives via Meta's webhook — a separate HTTP call. The browser's
-# EventSource points at the shim (port 54321), not here, so after persisting
-# the status update we forward it to the shim's /events/whatsapp-status
-# endpoint which then broadcasts to connected SSE clients (Phase 2 pattern).
+# status arrives via Meta's webhook — a separate HTTP call, so after persisting
+# the status update we forward it to the /events/whatsapp-status endpoint
+# which then broadcasts to connected SSE clients (Phase 2 pattern).
 def _broadcast_whatsapp_status(data: dict) -> None:
     msg = f"event: whatsapp_status\ndata: {json.dumps(data)}\n\n"
     dead: set[asyncio.Queue] = set()

@@ -1,7 +1,7 @@
 """Data access for the Follow-up Agent over Supabase/PostgREST.
 
-Locally this points at the DuckDB shim (SUPABASE_URL); on hosted it points at
-real Supabase. Replaces the asyncpg pool + repositories the original code used.
+Hits SUPABASE_URL (real Supabase). Replaces the asyncpg pool + repositories
+the original code used.
 """
 from __future__ import annotations
 
@@ -10,8 +10,8 @@ import os
 
 import httpx
 
-SUPABASE_URL = os.getenv("SUPABASE_URL", "http://localhost:54321")
-SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_KEY", "local-dev-anon-key")
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_KEY")
 
 
 def _headers() -> dict:

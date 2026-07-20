@@ -12,14 +12,9 @@ export const Route = createFileRoute('/login')({
   component: LoginPage,
 })
 
-const DEMO_ACCOUNTS = [
-  { label: 'Owner · ABC Nissan', email: 'owner@abcnissan.test' },
-  { label: 'Sales · XYZ Nissan', email: 'sales@xyznissan.test' },
-]
-
 function LoginPage() {
-  const [email, setEmail] = useState('owner@abcnissan.test')
-  const [password, setPassword] = useState('Passw0rd!23')
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
 
@@ -137,33 +132,6 @@ function LoginPage() {
               {loading ? 'Signing in…' : 'Sign in'}
             </Button>
           </form>
-
-          <div className="mt-7">
-            <div className="kicker text-muted-foreground/60">Demo accounts</div>
-            <div className="mt-2 space-y-2">
-              {DEMO_ACCOUNTS.map((a) => (
-                <button
-                  key={a.email}
-                  onClick={async () => {
-                    setEmail(a.email)
-                    setPassword('Passw0rd!23')
-                    setError(null)
-                    setLoading(true)
-                    const res = await signIn({ data: { email: a.email, password: 'Passw0rd!23' } })
-                    if (!res.ok) { setError(res.message); setLoading(false); return }
-                    window.location.href = '/dashboard'
-                  }}
-                  className="flex w-full items-center justify-between rounded-lg border border-border bg-card px-3 py-2 text-left transition hover:border-ring hover:bg-muted/40"
-                >
-                  <span className="text-[13px] font-semibold text-foreground">{a.label}</span>
-                  <span className="text-[12px] text-muted-foreground">{a.email}</span>
-                </button>
-              ))}
-            </div>
-            <p className="mt-2 text-[11.5px] text-muted-foreground/70">
-              Password is pre-filled for the demo.
-            </p>
-          </div>
         </div>
       </div>
     </div>

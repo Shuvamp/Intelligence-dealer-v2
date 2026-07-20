@@ -298,7 +298,7 @@ RLS POLICY:
 ```
 Backend (.env)
 ┌─────────────────────────────────────────────────────┐
-│ SUPABASE_URL=http://127.0.0.1:54321               │
+│ SUPABASE_URL=<hosted project URL from .env>       │
 │ SUPABASE_SERVICE_KEY=...                           │
 │                                                   │
 │ META_APP_ID=your_app_id_from_dashboard            │

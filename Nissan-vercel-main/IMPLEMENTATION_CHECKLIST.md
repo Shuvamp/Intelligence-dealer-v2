@@ -154,22 +154,17 @@ Total Files Modified: 5
 
 ### Phase 4: Database Migration ⚠️ YOU MUST DO THIS
 
-- [ ] Run migration: `cd supabase && supabase migration up`
-- [ ] Or reset: `supabase db reset` (if starting fresh)
-- [ ] Verify table created: `supabase db query "SELECT * FROM social_channel_connections LIMIT 1"`
+- [ ] Apply the migration to the hosted project: `supabase db push`, or run it via the SQL Editor
+- [ ] Verify table created: query `SELECT * FROM social_channel_connections LIMIT 1` in the SQL Editor
 
 ### Phase 5: Start Services ⚠️ YOU MUST DO THIS
 
 ```bash
-# Terminal 1: Supabase (if local dev)
-cd supabase
-supabase start
-
-# Terminal 2: FastAPI backend
+# Terminal 1: FastAPI backend
 cd apps/api
 python main.py
 
-# Terminal 3: React frontend
+# Terminal 2: React frontend
 cd apps/web
 npm run dev
 ```
@@ -191,8 +186,8 @@ npm run dev
 ### `apps/api/.env`
 
 ```bash
-# Existing (keep as is)
-SUPABASE_URL=http://127.0.0.1:54321
+# Existing (keep as is — hosted project URL/key)
+SUPABASE_URL=https://your-project.supabase.co
 SUPABASE_SERVICE_KEY=...
 
 # NEW - Add these from Meta Developer Dashboard
@@ -293,10 +288,9 @@ CREATE POLICY social_channel_connections_tenant
 ### Quick Test (Local)
 
 ```bash
-# 1. Start all services
+# 1. Start services (both point at the hosted Supabase project via .env)
 cd apps/api && python main.py &
 cd apps/web && npm run dev &
-cd supabase && supabase start &
 
 # 2. Open browser
 http://localhost:3000/_authed/marketing/connected-channels
@@ -362,10 +356,10 @@ SELECT * FROM social_channel_connections;
    - Add to .env
 
 2. **Run Database Migration** (5 min)
-   - `supabase db reset` or `supabase migration up`
+   - `supabase db push`, or apply it via the SQL Editor
 
 3. **Start Services** (2 min)
-   - Backend, frontend, Supabase
+   - Backend, frontend
 
 4. **Test OAuth Flow** (10 min)
    - Click Connect

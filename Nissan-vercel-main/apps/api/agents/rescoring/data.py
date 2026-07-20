@@ -10,8 +10,8 @@ import os
 
 import httpx
 
-SUPABASE_URL = os.getenv("SUPABASE_URL", "http://localhost:54321")
-SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_KEY", "local-dev-anon-key")
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_KEY")
 
 
 def _headers() -> dict:
@@ -82,9 +82,8 @@ class RescoringData:
             "score": score,
             "score_value": score_value,
             # Send the raw list, not json.dumps: leads.score_reasons is jsonb on
-            # Supabase (a stringified array would be stored as a scalar string,
-            # breaking the "AI reasoning" panel). The DuckDB shim stringifies
-            # arrays on write (serializeJson), so a raw list works there too.
+            # Supabase — a stringified array would be stored as a scalar string,
+            # breaking the "AI reasoning" panel.
             "score_reasons": score_reasons,
             "scored_by": scored_by,
             "last_activity_at": now,

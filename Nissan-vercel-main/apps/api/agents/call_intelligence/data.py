@@ -1,9 +1,9 @@
 """Data access for the Call Intelligence Agent over Supabase/PostgREST.
 
 Mirrors agents/whatsapp/data.py — each agent owns a thin REST client. Points at
-SUPABASE_URL (the DuckDB shim in local dev). JSON columns (customer_summary,
-competitors, reasoning, raw_analysis) are sent as native values and parsed
-defensively on read (the shim returns them as strings, Supabase as objects).
+SUPABASE_URL (real Supabase). JSON columns (customer_summary, competitors,
+reasoning, raw_analysis) are sent as native values and parsed defensively
+on read.
 """
 from __future__ import annotations
 
@@ -17,8 +17,8 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-SUPABASE_URL = os.getenv("SUPABASE_URL", "http://localhost:54321")
-SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_KEY", "local-dev-anon-key")
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_KEY")
 
 _JSON_FIELDS = ("customer_summary", "competitors", "reasoning", "raw_analysis")
 

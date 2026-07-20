@@ -1,8 +1,8 @@
 import { chromium } from 'playwright';
 
 const BASE_URL = 'http://localhost:3000';
-const EMAIL = 'owner@abcnissan.test';
-const PASS = 'Passw0rd!23';
+const EMAIL = (process.env.VERIFY_EMAIL || 'owner@abcnissan.test');
+const PASS = (process.env.VERIFY_PASSWORD || 'Passw0rd!23');
 
 const results = [];
 

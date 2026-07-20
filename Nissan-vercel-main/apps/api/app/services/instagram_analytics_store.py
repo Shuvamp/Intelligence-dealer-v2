@@ -1,8 +1,8 @@
 """Data access for Instagram media IDs + analytics snapshots.
 
 Thin async REST client — same pattern as linkedin_analytics_store.py: hits
-SUPABASE_URL (the DuckDB shim locally, real Supabase in prod) with
-SUPABASE_SERVICE_KEY, since this is a background-job / cross-tenant data path
+SUPABASE_URL (real Supabase) with SUPABASE_SERVICE_KEY, since this is a
+background-job / cross-tenant data path
 with no per-request caller JWT to scope with.
 
 Tables: instagram_posts, instagram_post_metrics
@@ -21,7 +21,7 @@ from app.config import SUPABASE_URL, SUPABASE_SERVICE_KEY
 
 logger = logging.getLogger(__name__)
 
-_KEY = SUPABASE_SERVICE_KEY or "local-dev-anon-key"
+_KEY = SUPABASE_SERVICE_KEY
 
 
 def _headers() -> dict:

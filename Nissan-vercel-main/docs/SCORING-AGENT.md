@@ -140,7 +140,7 @@ cd apps/api
 pip install -r requirements.txt
 python -m uvicorn main:app --port 8000
 
-# 2. shim + web (from repo root)
+# 2. web (from repo root)
 npm run dev          # or: npm run dev:api   /   npm run dev:web
 ```
 

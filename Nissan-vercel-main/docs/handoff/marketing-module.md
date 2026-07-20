@@ -9,13 +9,10 @@ You're building the **UI** for the Marketing Intelligence module. The foundation
 
 ## Run it
 ```bash
-colima start && supabase start          # if not already up
-supabase db reset                       # applies migrations + seed.sql
-python3 scripts/seed_demo_users.py      # users + leads + MARKETING data
-cd apps/web && npm run dev              # http://localhost:3000
+cd apps/web && npm run dev              # http://localhost:3000, against the hosted Supabase project
 ```
-Log in `owner@abcnissan.test` / `Passw0rd!23`. Seeded: 4 campaigns, 6 posts (2 in approval,
-2 published, scheduled + draft), 2 scorecards. XYZ has its own (use it to test isolation).
+Sign in with a real account. Create a campaign/post via the UI to exercise the flow; a
+second tenant's account is useful for verifying isolation.
 
 ## What's already built (your contract — don't rebuild)
 - **Types:** `apps/web/src/lib/types.ts` — Campaign, CampaignPost, CampaignInsight, MarketingOverview, MonthPlan, MonthOpportunity, RecommendedCampaign, CampaignSummary, CampaignScorecard.
@@ -45,4 +42,4 @@ Signatures/return shapes stay the same, so the UI never changes. The 8 agents ar
 - jsonb/`unknown` in a server-fn **return** breaks its type — use the `JsonValue` type.
 - After a mutation: `await router.invalidate()`. Never `router.navigate` to the same page (it aborts the in-flight RPC).
 - `#/` → `src/`. Tailwind v4 (only valid classes — no `font-700`, no `h-5.5`). Brand accent: `var(--brand)` / `brand-bg` / `brand-text`. Numbers: class `num`.
-- Verify in a real browser before calling it done (Playwright scripts in `apps/web/scripts/verify-*.mjs` show the pattern). Confirm XYZ isolation.
+- Verify in a real browser before calling it done (Playwright scripts in `apps/web/scripts/verify-*.mjs` show the pattern). Confirm tenant isolation with a second account.

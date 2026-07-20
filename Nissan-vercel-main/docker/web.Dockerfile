@@ -21,9 +21,10 @@ WORKDIR /app
 COPY apps/web/ apps/web/
 
 # Build args — Vite bakes these into the client bundle at build time.
-# They point at the public-facing URLs the browser will use.
-ARG VITE_SUPABASE_URL=http://localhost:54321
-ARG VITE_SUPABASE_ANON_KEY=local-dev-anon-key
+# They point at the public-facing URLs the browser will use. No defaults —
+# the hosted Supabase project's URL/anon key must be passed in at build time.
+ARG VITE_SUPABASE_URL
+ARG VITE_SUPABASE_ANON_KEY
 ARG VITE_AGENT_API_URL=http://localhost:8000
 
 ENV VITE_SUPABASE_URL=$VITE_SUPABASE_URL \

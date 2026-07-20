@@ -1,5 +1,10 @@
 # Assignment Agent — Complete Implementation Guide
 
+> **Note:** the assignment logic now runs in the FastAPI backend (`apps/api`, port 8000)
+> — see `docs/FASTAPI-MIGRATION-GUIDE.md`. The code samples below (`apps/local-api`,
+> port 54321) reflect the original Node.js prototype and are kept for background only;
+> that directory is no longer part of the repo.
+
 ## Overview
 A multi-tenant, intelligent lead assignment system for ADIP (Nissan CRM). Automatically assigns scored leads to sales executives with:
 - **Least-loaded assignment** — picks the executive with lowest current load

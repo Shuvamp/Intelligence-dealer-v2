@@ -110,7 +110,7 @@ Exact field shapes (`NormalizedLead`, `Scoring`, `Assignment`) are documented in
 ### `deps` — what's injected into every node
 
 ```python
-deps.supabase_url       # Supabase URL (or local DuckDB shim URL)
+deps.supabase_url       # the hosted Supabase project's URL (from apps/api/.env)
 deps.tenant_id          # the ABC tenant id (all intake leads belong here)
 deps.anthropic_key      # ANTHROPIC_API_KEY, or None if not set
 ```
@@ -133,7 +133,7 @@ from agents.intake_pipeline.contracts import NodeDeps
 
 async def test():
     state = {'normalized': {'name':'Test','vehicle':'Magnite','email':'a@b.com','city':'Chennai','source':'website'}}
-    deps = NodeDeps(supabase_url='http://localhost:54321', tenant_id='abc', anthropic_key=None)
+    deps = NodeDeps(supabase_url='<hosted project URL from apps/api/.env>', tenant_id='abc', anthropic_key=None)
     print(await score_node(state, deps))
 
 asyncio.run(test())

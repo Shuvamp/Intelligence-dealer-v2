@@ -8,8 +8,8 @@ Governing principle: the PLATFORM owns the dimensions; we own the facts.
   market_signals, tagged so reruns are idempotent without touching UI/agent data.
 
 Connection: via platform_sim.db.connect(), which reads PGHOST/PGPORT/PGUSER/
-PGPASSWORD/PGDATABASE from env. Default .env points at the local Supabase
-Postgres (port 54322, db postgres). Connecting as `postgres` (DB superuser)
+PGPASSWORD/PGDATABASE from env. .env points at the hosted Supabase project's
+Postgres (db postgres). Connecting as `postgres` (DB superuser)
 bypasses RLS — the audited system-ingestion path called out in the spec §7.
 
 Run:

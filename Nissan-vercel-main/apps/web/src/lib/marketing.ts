@@ -81,20 +81,14 @@ function toDateStr(v: unknown): string | null {
   return String(v).substring(0, 10)
 }
 
-// Demo-mode fallback: auth.ts is a stub (signIn is a no-op) so no real Supabase
-// session exists. All server functions need a tenantId for DuckDB ops and RLS.
-const DEMO_CTX = { userId: 'demo-owner-id', tenantId: '11111111-1111-1111-1111-111111111111' }
-
 async function authCtx(supabase: ReturnType<typeof getSupabaseServerClient>) {
   const {
     data: { user },
   } = await supabase.auth.getUser()
-  if (!user) return DEMO_CTX
+  if (!user) throw new Error('Not authenticated')
   const { data } = await supabase.from('users').select('tenant_id').eq('id', user.id).single()
-  // data?.tenant_id can be undefined (user in auth but missing from users table).
-  // undefined is NOT null in DuckDB's Node binding — it skips the ?-slot, shifting
-  // all subsequent params left and leaving the last placeholder unbound.
-  return { userId: user.id, tenantId: (data?.tenant_id ?? DEMO_CTX.tenantId) as string }
+  if (!data?.tenant_id) throw new Error('User has no tenant')
+  return { userId: user.id, tenantId: data.tenant_id as string }
 }
 
 // =====================================================================

@@ -4,7 +4,7 @@ The ingestion + identity-resolution + analytical layer that **populates the
 ADIP spine** from real lead sources. ADIP has the destination tables
 (`customers`, `leads`, `market_signals`, …); this pipeline fills them.
 
-> **Status:** working prototype on the local Supabase Postgres. Tenant-aligned
+> **Status:** working prototype on the hosted Supabase Postgres. Tenant-aligned
 > to the spine rules (every row has `tenant_id`; identity resolution is
 > per-dealer). Wired to Supabase via the bridge loader (`bridge/`).
 
@@ -53,20 +53,15 @@ Run via `psql -f sql/03_build_marts.sql`. All views are `CREATE OR REPLACE`
 (idempotent). No dbt, no mashumaro, no Python-version constraint — the only
 Python dependency is `psycopg2-binary`.
 
-## Run locally (Supabase Postgres)
+## Run (hosted Supabase Postgres)
 
 ```bash
-# 1. Start the Supabase local stack and seed platform dimensions.
-cd /path/to/adip
-supabase start
-python3 scripts/seed_demo_users.py
-
-# 2. Configure the pipeline connection.
+# 1. Configure the pipeline connection.
 cd data-pipeline
 pip install psycopg2-binary
-cp .env.example .env       # defaults already target :54322/postgres
+cp .env.example .env       # fill in the hosted project's PGHOST/PGPASSWORD
 
-# 3. Run the full pipeline.
+# 2. Run the full pipeline.
 ./run_local.sh             # DDL -> intake -> marketing -> SQL marts -> demo
 ```
 

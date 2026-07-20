@@ -1,7 +1,7 @@
 # Supabase + Vercel Migration — Status & Runbook
 
-Target Supabase project: **`guoeqsrdmxqzmaxjfald`** (ap-northeast-1, Postgres 17)
-URL: `https://guoeqsrdmxqzmaxjfald.supabase.co`
+Target Supabase project: **`ajuglsslkuydasasiscg`** (ap-northeast-1, Postgres 17)
+URL: `https://ajuglsslkuydasasiscg.supabase.co`
 
 ## ✅ Done & verified (database)
 
@@ -37,16 +37,16 @@ URL: `https://guoeqsrdmxqzmaxjfald.supabase.co`
 ## Env vars to set
 
 **Vercel (web)** — Project → Settings → Environment Variables (Production), Root Directory = `apps/web`:
-- `VITE_SUPABASE_URL=https://guoeqsrdmxqzmaxjfald.supabase.co`
-- `VITE_SUPABASE_ANON_KEY=sb_publishable_TKraB6SceaVTD-7nrbJDLA_nISDs_I5`
+- `VITE_SUPABASE_URL=https://ajuglsslkuydasasiscg.supabase.co`
+- `VITE_SUPABASE_ANON_KEY` = Supabase dashboard → Settings → API → **anon/publishable** key
 - `VITE_AGENT_API_URL=https://<render-fastapi-url>`
 - `FASTAPI_URL=https://<render-fastapi-url>` (server-side marketing/analytics/copilot calls)
 
 **Railway (FastAPI)** — Service → Settings → **Root Directory = `apps/api`** (so `railway.json` +
 `Dockerfile` are found), then Variables → add:
-- `SUPABASE_URL=https://guoeqsrdmxqzmaxjfald.supabase.co`
+- `SUPABASE_URL=https://ajuglsslkuydasasiscg.supabase.co`
 - `SUPABASE_SERVICE_KEY` = Supabase dashboard → Settings → API → **service_role** key (secret)
-- `ASSIGNMENT_DB_URL=https://guoeqsrdmxqzmaxjfald.supabase.co`
+- `ASSIGNMENT_DB_URL=https://ajuglsslkuydasasiscg.supabase.co`
 - `FRONTEND_URL` = the Vercel URL
 - LLM keys as needed: `ANTHROPIC_API_KEY`, `GROQ_API_KEY`, `GEMINI_API_KEY`, `NVIDIA_API_KEY`
 - Railway injects `PORT` automatically (the Dockerfile already honors it).

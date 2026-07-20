@@ -1,8 +1,7 @@
 """Follow-up Agent: fetch lead -> decide action -> draft message -> notify assignee.
 
-LangGraph pipeline (team standard). Data access is over Supabase/PostgREST (the
-DuckDB shim locally); the LLM is Groq with a deterministic fallback so it runs
-with zero config.
+LangGraph pipeline (team standard). Data access is over Supabase/PostgREST;
+the LLM is Groq with a deterministic fallback so it runs with zero config.
 """
 import logging
 import re

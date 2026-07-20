@@ -1,7 +1,7 @@
-"""Self-check for app/storage.py against local Supabase Storage.
+"""Self-check for app/storage.py against Supabase Storage.
 
 Run: python apps/api/tests/test_storage.py
-Requires `supabase start` running locally (uses SUPABASE_URL/SUPABASE_SERVICE_KEY from .env).
+Requires SUPABASE_URL/SUPABASE_SERVICE_KEY (hosted project) in .env.
 """
 import sys
 import uuid

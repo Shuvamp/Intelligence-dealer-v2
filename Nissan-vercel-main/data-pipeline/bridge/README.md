@@ -13,31 +13,28 @@ multi-tenant data computed from our pipeline.
 ## Topology
 
 In-DB. The pipeline schemas (`bronze`, `silver`, `gold`, `agent`) live in the
-**same Postgres** as the spine (`public.*`) — the local Supabase Postgres on
-`localhost:54322`, database `postgres`. One DB = one transaction = a trivial
-ID bridge (no FDW, no two connection pools).
+**same Postgres** as the spine (`public.*`) — the hosted Supabase project's
+Postgres, database `postgres`. One DB = one transaction = a trivial ID bridge
+(no FDW, no two connection pools).
 
 ## Auth path
 
 The loader connects directly as the `postgres` role (DB superuser →
 `BYPASSRLS`). This is the spec's audited system-ingestion path. The
 service-role JWT is **not** used here — that key is for the GoTrue auth-admin
-API (which `scripts/seed_demo_users.py` needs because it creates auth users).
-The bridge writes only to `public.*`, so it doesn't need it.
+API. The bridge writes only to `public.*`, so it doesn't need it. Tenant,
+location, and user rows must already exist in the hosted project (created via
+Supabase Auth / the app's sign-up flow, or the platform's own seed data) — the
+loader never invents them.
 
 Normal app access (web/BFF) continues to use the caller's JWT.
 
 ## One-time setup
 
 ```bash
-# 1. Ensure Supabase local stack is up; seed the demo dimensions.
-cd /c/Users/New\ User/Desktop/adip
-supabase start
-python3 scripts/seed_demo_users.py     # tenants/locations/users now real
-
-# 2. Point the pipeline at Supabase and install its schemas.
+# 1. Point the pipeline at the hosted Supabase project's Postgres and install its schemas.
 cd data-pipeline
-cp .env.example .env                    # defaults already target :54322/postgres
+cp .env.example .env                    # fill in the hosted project's PGHOST/PGPASSWORD
 set -a && . ./.env && set +a
 psql -v ON_ERROR_STOP=1 -f sql/01_core_ddl.sql
 psql -v ON_ERROR_STOP=1 -f sql/02_spine_bridge_state.sql
@@ -76,7 +73,7 @@ python -m bridge.load
 psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$PGDATABASE" -f bridge/verify.sql
 ```
 
-Then, signed in as `owner@abcnissan.test` in the web app:
+Then, signed in as a real account in the web app:
 - Dashboard hero metrics non-zero (hot leads, test drives, scheduled posts).
 - Leads pipeline board shows leads across stages with real assignee names.
 - Intelligence Regional Demand shows real `public.locations` names.

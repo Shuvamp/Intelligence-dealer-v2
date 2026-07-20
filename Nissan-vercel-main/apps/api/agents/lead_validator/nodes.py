@@ -5,8 +5,8 @@ import httpx
 from datetime import datetime
 from .state import LeadValidatorState, ValidationError
 
-SUPABASE_URL = os.getenv("SUPABASE_URL", "http://localhost:54321")
-SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY", "local-dev-anon-key")
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY")
 
 VALID_SOURCES = {"oem", "website", "facebook", "instagram", "walkin", "phone", "event", "referral"}
 VALID_BUDGET_RANGES = {"under_8l", "8_12l", "12_18l", "18_25l", "above_25l"}
@@ -154,10 +154,7 @@ def dedup_and_persist(state: LeadValidatorState) -> LeadValidatorState:
     with httpx.Client(base_url=SUPABASE_URL, headers=_headers()) as client:
 
         # 1. look up customer by phone, then by email if no phone match.
-        # Two separate eq. lookups rather than a single `or=` filter — the
-        # local DuckDB shim's PostgREST emulation doesn't support `or=`, only
-        # plain eq./neq./etc., so this is the one form that works against
-        # both the shim and real Supabase.
+        # Two separate eq. lookups rather than a single `or=` filter.
         resp = client.get(
             "/rest/v1/customers",
             params={"select": "id", "phone": f"eq.{phone}", "limit": "1"},

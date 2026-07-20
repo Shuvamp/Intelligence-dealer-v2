@@ -17,7 +17,7 @@ import httpx
 
 from app.config import SUPABASE_URL, SUPABASE_SERVICE_KEY
 
-_KEY = SUPABASE_SERVICE_KEY or "local-dev-anon-key"
+_KEY = SUPABASE_SERVICE_KEY
 _WS = re.compile(r"\s+")
 
 

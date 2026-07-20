@@ -62,9 +62,7 @@ async def seed_executives(db: Database) -> None:
     if existing and existing.get("count"):
         return
 
-    # Fixed UUIDs (sales_executives.id is a real `uuid` column on Supabase —
-    # the old DuckDB shim's plain "exec-abc-ravi" style ids only worked
-    # because DuckDB's VARCHAR PK didn't enforce a uuid shape).
+    # Fixed UUIDs — sales_executives.id is a real `uuid` column on Supabase.
     abc_execs = [
         ("a1111111-0000-0000-0000-0000000000a1", ABC_TENANT_ID, "Ravi", "active", 0, 10),
         ("a1111111-0000-0000-0000-0000000000a2", ABC_TENANT_ID, "Priya", "active", 0, 10),

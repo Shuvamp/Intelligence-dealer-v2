@@ -10,7 +10,7 @@ from dotenv import load_dotenv
 # makes env loading independent of the working directory.
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
-SUPABASE_URL: str = os.getenv("SUPABASE_URL", "http://localhost:54321")
+SUPABASE_URL: str = os.getenv("SUPABASE_URL", "")
 SUPABASE_SERVICE_KEY: str = os.getenv("SUPABASE_SERVICE_KEY", "")
 SUPABASE_POSTERS_BUCKET: str = os.getenv("SUPABASE_POSTERS_BUCKET", "posters")
 SUPABASE_VIDEOS_BUCKET: str = os.getenv("SUPABASE_VIDEOS_BUCKET", "videos")

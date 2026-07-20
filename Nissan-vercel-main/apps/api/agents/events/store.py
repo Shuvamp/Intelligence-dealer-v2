@@ -2,7 +2,7 @@
 
 One row per published event in `domain_events` — the observable, recoverable
 log. Mirrors agents/rescoring/data.py's thin PostgREST client pattern. Points at
-SUPABASE_URL (the DuckDB shim in local dev). Never raises out of the bus path
+SUPABASE_URL (real Supabase). Never raises out of the bus path
 on a store failure — persistence is best-effort so a logging hiccup can't stop
 event delivery (rule #13).
 """
@@ -17,8 +17,8 @@ from .types import DomainEvent
 
 logger = logging.getLogger(__name__)
 
-SUPABASE_URL = os.getenv("SUPABASE_URL", "http://localhost:54321")
-SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_KEY", "local-dev-anon-key")
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_KEY")
 
 
 def _headers() -> dict:
@@ -61,8 +61,7 @@ class EventStore:
             logger.exception("domain_events mark(%s) failed for %s", status, event_id)
 
     async def list_unprocessed(self, limit: int = 100) -> list[DomainEvent]:
-        """Events not yet `done` — used by replay (recoverability). `neq` is the
-        only filter the DuckDB shim's PostgREST emulation supports here."""
+        """Events not yet `done` — used by replay (recoverability)."""
         try:
             async with httpx.AsyncClient(base_url=SUPABASE_URL, timeout=10) as c:
                 r = await c.get(

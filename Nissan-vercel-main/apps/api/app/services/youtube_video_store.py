@@ -1,8 +1,8 @@
 """Data access for published YouTube videos.
 
 Thin async REST client — same pattern as linkedin_analytics_store.py /
-agents/rescoring/data.py: hits SUPABASE_URL (the DuckDB shim locally, real
-Supabase in prod) with SUPABASE_SERVICE_KEY.
+agents/rescoring/data.py: hits SUPABASE_URL (real Supabase) with
+SUPABASE_SERVICE_KEY.
 
 Table: youtube_videos (supabase/migrations/0037_youtube_channel.sql; mirrored
 in apps/local-api/server.js for local dev).
@@ -19,7 +19,7 @@ from app.config import SUPABASE_URL, SUPABASE_SERVICE_KEY
 
 logger = logging.getLogger(__name__)
 
-_KEY = SUPABASE_SERVICE_KEY or "local-dev-anon-key"
+_KEY = SUPABASE_SERVICE_KEY
 
 
 def _headers() -> dict:

@@ -1,11 +1,11 @@
 # ── ADIP Docker Compose ───────────────────────────────────────────────────────
 #
 # Profiles:
-#   dev   — web + api + nginx against a local Supabase stack (`supabase start`)
-#   prod  — web + api + nginx against real Supabase (set env vars in .env.prod)
+#   dev   — web + api + nginx against the hosted Supabase project (apps/*/.env)
+#   prod  — web + api + nginx against the hosted Supabase project (.env.prod)
 #
 # Usage:
-#   dev:   supabase start && docker compose --profile dev up --build
+#   dev:   docker compose --profile dev up --build
 #   prod:  docker compose --profile prod up --build
 #
 # NOTE: `npm run dev` on the host still works exactly as before — Docker is the
@@ -54,8 +54,7 @@ services:
       dockerfile: docker/web.Dockerfile
       args:
         # Vite bakes these into the browser bundle at build time.
-        # Dev: local Supabase URL/anon key from `supabase status`.
-        # Prod: real Supabase project URL.
+        # Both dev and prod point at the hosted Supabase project.
         VITE_SUPABASE_URL: ${VITE_SUPABASE_URL}
         VITE_SUPABASE_ANON_KEY: ${VITE_SUPABASE_ANON_KEY}
         VITE_AGENT_API_URL: ${VITE_AGENT_API_URL:-http://localhost:8000}

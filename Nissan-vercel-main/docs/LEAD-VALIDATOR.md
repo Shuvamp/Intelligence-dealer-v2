@@ -120,7 +120,7 @@ pip install -r requirements.txt
 uvicorn main:app --port 8001 --reload
 ```
 
-Requires `SUPABASE_URL` env var (defaults to `http://localhost:54321` for local dev).
+Requires `SUPABASE_URL` env var — set it to the hosted Supabase project's URL (from `apps/api/.env`). There is no local-stack default.
 
 ---
 

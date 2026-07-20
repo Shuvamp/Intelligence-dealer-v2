@@ -64,9 +64,9 @@ function LeadDetailPage() {
   // Handles: whatsapp_inbound (customer reply) and rescore_complete (Phase 6).
   useEffect(() => {
     if (!detail) return
-    const supabaseUrl =
-      (import.meta.env.VITE_SUPABASE_URL as string | undefined) ?? 'http://localhost:54321'
-    const es = new EventSource(`${supabaseUrl}/intake/stream`)
+    const agentUrl =
+      (import.meta.env.VITE_AGENT_API_URL as string | undefined) ?? 'http://localhost:8000'
+    const es = new EventSource(`${agentUrl}/intake/stream`)
     es.onmessage = (ev) => {
       try {
         const d = JSON.parse(ev.data as string) as {
@@ -723,9 +723,9 @@ function WhatsAppSendCard({
         reader.onerror = reject
         reader.readAsDataURL(file)
       })
-      const supabaseUrl =
-        (import.meta.env.VITE_SUPABASE_URL as string | undefined) ?? 'http://localhost:54321'
-      const res = await fetch(`${supabaseUrl}/upload`, {
+      const agentUrl =
+        (import.meta.env.VITE_AGENT_API_URL as string | undefined) ?? 'http://localhost:8000'
+      const res = await fetch(`${agentUrl}/upload`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ filename: file.name, data: base64, mimetype: file.type }),
@@ -746,9 +746,9 @@ function WhatsAppSendCard({
   // Live delivery status via SSE
   useEffect(() => {
     if (!result?.wamid) return
-    const supabaseUrl =
-      (import.meta.env.VITE_SUPABASE_URL as string | undefined) ?? 'http://localhost:54321'
-    const es = new EventSource(`${supabaseUrl}/intake/stream`)
+    const agentUrl =
+      (import.meta.env.VITE_AGENT_API_URL as string | undefined) ?? 'http://localhost:8000'
+    const es = new EventSource(`${agentUrl}/intake/stream`)
     es.onmessage = (e) => {
       try {
         const data = JSON.parse(e.data as string) as { type?: string; wamid?: string; status?: string }

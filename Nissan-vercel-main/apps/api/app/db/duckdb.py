@@ -45,7 +45,7 @@ def _sync_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-_KEY = SUPABASE_SERVICE_KEY or "local-dev-anon-key"
+_KEY = SUPABASE_SERVICE_KEY
 
 
 def _headers(prefer: str = "return=representation") -> dict:

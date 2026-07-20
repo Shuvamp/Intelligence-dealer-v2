@@ -1,8 +1,7 @@
 """Data access for the Workflow Agent over Supabase/PostgREST.
 
-Locally this points at the DuckDB shim (SUPABASE_URL); on hosted it points at
-real Supabase. Mirrors apps/api/agents/followup/data.py's pattern — each
-agent owns its own thin REST client rather than sharing one, consistent
+Hits SUPABASE_URL (real Supabase). Mirrors apps/api/agents/followup/data.py's
+pattern — each agent owns its own thin REST client rather than sharing one, consistent
 with how lead_validator/followup/assignment already do this independently.
 """
 from __future__ import annotations
@@ -12,8 +11,8 @@ import os
 
 import httpx
 
-SUPABASE_URL = os.getenv("SUPABASE_URL", "http://localhost:54321")
-SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_KEY", "local-dev-anon-key")
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_KEY")
 
 
 def _headers() -> dict:

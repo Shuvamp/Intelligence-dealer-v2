@@ -18,15 +18,14 @@ const MAX_LEAD_LIMIT = 15
 // Demo/local bypass mirrors lib/leads.ts: login is stubbed, so server-side
 // there is no real Supabase session. Fall back to the seeded ABC Nissan tenant
 // so the dashboard renders instead of showing "No executives found".
-const DEMO_TENANT_ID = '11111111-1111-1111-1111-111111111111'
-
 async function tenantId(supabase: ReturnType<typeof getSupabaseServerClient>) {
   const {
     data: { user },
   } = await supabase.auth.getUser()
-  if (!user) return DEMO_TENANT_ID
+  if (!user) throw new Error('Not authenticated')
   const { data } = await supabase.from('users').select('tenant_id').eq('id', user.id).single()
-  return (data?.tenant_id as string) ?? DEMO_TENANT_ID
+  if (!data?.tenant_id) throw new Error('User has no tenant')
+  return data.tenant_id as string
 }
 
 // leads.score is an enum (hot/warm/cold/dead); the history badge only styles

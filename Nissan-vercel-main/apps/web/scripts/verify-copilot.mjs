@@ -7,8 +7,8 @@ page.on('requestfailed', (r) => { if (r.url().includes('_serverFn')) errors.push
 try {
   await page.goto('http://localhost:3000/login', { waitUntil: 'domcontentloaded' })
   await page.waitForSelector('input[type=email]'); await page.waitForTimeout(1500)
-  await page.fill('input[type=email]', 'owner@abcnissan.test')
-  await page.fill('input[type=password]', 'Passw0rd!23')
+  await page.fill('input[type=email]', (process.env.VERIFY_EMAIL || 'owner@abcnissan.test'))
+  await page.fill('input[type=password]', (process.env.VERIFY_PASSWORD || 'Passw0rd!23'))
   await page.click('button:has-text("Sign in")')
   await page.waitForURL('**/dashboard', { timeout: 20000 })
 

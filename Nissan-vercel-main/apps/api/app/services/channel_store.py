@@ -31,7 +31,7 @@ _COLUMNS = [
     "youtube_channel_id", "youtube_channel_name", "refresh_token", "token_expires_at",
 ]
 
-_KEY = SUPABASE_SERVICE_KEY or "local-dev-anon-key"
+_KEY = SUPABASE_SERVICE_KEY
 
 
 def _now() -> str:

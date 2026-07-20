@@ -22,7 +22,7 @@ from agents.assignment.database import Database
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-_KEY = SUPABASE_SERVICE_KEY or "local-dev-anon-key"
+_KEY = SUPABASE_SERVICE_KEY
 DEMO_TENANT_ID = "11111111-1111-1111-1111-111111111111"
 
 
