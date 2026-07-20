@@ -17,7 +17,7 @@ import {
   ScoreBadge, StageBadge, SourceTag, SOURCE_META, STAGE_META, formatMoney,
 } from '#/components/leads/lead-ui'
 import { ActivityDrawer } from '#/components/leads/ActivityDrawer'
-import { CallHistory, CallIntelligence, MessagesPanel, DocumentsPanel, ScoreHistoryPanel } from '#/components/leads/DetailSections'
+import { MessagesPanel, ScoreHistoryPanel } from '#/components/leads/DetailSections'
 import type { LeadDetail, LeadStage, SalesMember, Lead } from '#/lib/types'
 
 export const Route = createFileRoute('/_authed/leads/$leadId')({
@@ -143,9 +143,6 @@ function LeadDetailPage() {
               messages={detail.messages}
             />
             <MessagesPanel detail={detail} />
-            <CallIntelligence leadId={lead.id} />
-            <CallHistory detail={detail} />
-            <DocumentsPanel />
           </div>
 
           {/* Right — at-a-glance sidebar: profile, scoring, next action, ownership, activity */}
@@ -1277,9 +1274,6 @@ function AssignControl({ lead, team }: { lead: LeadDetail['lead']; team: Array<S
           </select>
           <ArrowRight className="pointer-events-none absolute right-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 rotate-90 text-muted-foreground" />
         </div>
-        <p className="mt-2 text-[11.5px] text-muted-foreground/70">
-          Initially routed by Keerthana’s assignment agent. Reassigning logs an event on the timeline.
-        </p>
       </div>
     </Panel>
   )

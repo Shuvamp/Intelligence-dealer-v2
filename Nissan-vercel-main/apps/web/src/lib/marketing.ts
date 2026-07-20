@@ -1943,7 +1943,10 @@ export const saveContentPosterUrl = createServerFn({ method: 'POST' })
   .handler(async ({ data }): Promise<{ ok: true; url: string }> => {
     const supabase = getSupabaseServerClient()
     const { tenantId } = await authCtx(supabase)
-    const url = `${POSTER_PUBLIC_URL}${data.path}?v=${Date.now()}`
+    // data.path is an absolute Supabase Storage URL (poster_upload returns storage.upload's
+    // public URL). Only legacy relative "/posters/..." paths need the public base prefixed.
+    const base = /^https?:\/\//i.test(data.path) ? data.path : `${POSTER_PUBLIC_URL}${data.path}`
+    const url = `${base}?v=${Date.now()}`
     const { updateDayContent, updateOpportunityContent } = await import('./analytics.duckdb')
     if (data.kind === 'day' && data.campaign_id && data.day_date) {
       await updateDayContent(data.campaign_id, tenantId, data.day_date, { poster_url: url })

@@ -23,5 +23,9 @@ async def assign_node(state: PipelineState, deps: NodeDeps) -> dict:
     scoring = state.get("scoring") or {}
     tenant_id = deps.get("tenant_id") if isinstance(deps, dict) else None
 
-    assignment = await assign_scored_lead(normalized, scoring, tenant_id=tenant_id)
+    # Pass the real lead_id (persisted by validate_node) so the agent's
+    # lead_assignments row FKs a real lead instead of a random uuid (→ 409).
+    assignment = await assign_scored_lead(
+        normalized, scoring, tenant_id=tenant_id, lead_id=state.get("lead_id"),
+    )
     return {"assignment": assignment}

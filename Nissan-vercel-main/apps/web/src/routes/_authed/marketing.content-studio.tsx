@@ -85,13 +85,10 @@ const POSTER_DISPLAY_BASE = (
 
 function posterDisplayUrl(url: string): string {
   if (!url || url.startsWith('data:') || url.startsWith('blob:')) return url
-  try {
-    const parsed = new URL(url, typeof window !== 'undefined' ? window.location.href : 'http://localhost')
-    const idx = parsed.pathname.indexOf('/posters/')
-    if (idx >= 0) return `${POSTER_DISPLAY_BASE}${parsed.pathname.slice(idx)}${parsed.search}`
-  } catch {
-    if (url.startsWith('/posters/')) return `${POSTER_DISPLAY_BASE}${url}`
-  }
+  // Absolute URLs (Supabase Storage public URLs) are already reachable — serve as-is.
+  // Only legacy relative "/posters/..." paths need the FastAPI backend base prefixed.
+  if (/^https?:\/\//i.test(url)) return url
+  if (url.startsWith('/posters/')) return `${POSTER_DISPLAY_BASE}${url}`
   return url
 }
 

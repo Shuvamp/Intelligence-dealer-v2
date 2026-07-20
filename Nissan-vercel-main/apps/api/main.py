@@ -96,8 +96,11 @@ app.include_router(marketing_budget_planner.router, prefix="/marketing-budget-pl
 # ---------------------------------------------------------------------------
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_KEY")
-ABC_TENANT_ID = "11111111-1111-1111-1111-111111111111"
-LOC_VEL_ID = "aaaaaaaa-0000-0000-0000-000000000001"
+# Tenant/location intake writes leads under. Must exist in the hosted DB (FK).
+# Overridable via env so each deploy targets its own tenant; the seed IDs are
+# the local-seed fallback only.
+ABC_TENANT_ID = os.getenv("INTAKE_TENANT_ID", "11111111-1111-1111-1111-111111111111")
+LOC_VEL_ID = os.getenv("INTAKE_LOCATION_ID", "aaaaaaaa-0000-0000-0000-000000000001")
 
 
 def _sb_headers() -> dict:

@@ -557,13 +557,11 @@ async def poster_upload(
         kind=kind, campaign_id=campaign_id, event_id=event_id,
         day_num=day_num, day_date=day_date, theme=theme, title=title,
     )
-    # Drop any prior poster (jpg+png) at this stem so display/publish use the upload.
+    # Drop any prior poster at this stem so display/publish use the upload.
+    # _find_existing_poster returns a Storage object key (str), removed via storage.remove.
     existing = _find_existing_poster(req)
     if existing:
-        try:
-            existing.unlink()
-        except Exception as exc:
-            logger.warning("[poster:upload] could not remove old poster (%s)", exc)
+        storage.remove(SUPABASE_POSTERS_BUCKET, existing)
 
     save_ext = "jpg" if ext in (".jpg", ".jpeg") else ext.lstrip(".")
     path = _save_poster(req, contents, save_ext)
