@@ -1,7 +1,9 @@
 """Schema + demo data for the assignment agent (KEERTHANA).
 
-Creates the four assignment tables and seeds active sales executives per
-tenant in the agent's in-process DuckDB. Tenant ids match the rest of ADIP.
+Seeds active sales executives per tenant into the real Supabase
+sales_executives table (schema already created by migration 0025 — the
+CREATE TABLE statements below are no-ops against Supabase). Tenant ids match
+the rest of ADIP.
 """
 
 from .database import Database
@@ -60,16 +62,19 @@ async def seed_executives(db: Database) -> None:
     if existing and existing.get("count"):
         return
 
+    # Fixed UUIDs (sales_executives.id is a real `uuid` column on Supabase —
+    # the old DuckDB shim's plain "exec-abc-ravi" style ids only worked
+    # because DuckDB's VARCHAR PK didn't enforce a uuid shape).
     abc_execs = [
-        ("exec-abc-ravi", ABC_TENANT_ID, "Ravi", "active", 0, 10),
-        ("exec-abc-priya", ABC_TENANT_ID, "Priya", "active", 0, 10),
-        ("exec-abc-karthik", ABC_TENANT_ID, "Karthik", "active", 0, 10),
-        ("exec-abc-divya", ABC_TENANT_ID, "Divya", "active", 0, 10),
-        ("exec-abc-arjun", ABC_TENANT_ID, "Arjun", "active", 0, 10),
+        ("a1111111-0000-0000-0000-0000000000a1", ABC_TENANT_ID, "Ravi", "active", 0, 10),
+        ("a1111111-0000-0000-0000-0000000000a2", ABC_TENANT_ID, "Priya", "active", 0, 10),
+        ("a1111111-0000-0000-0000-0000000000a3", ABC_TENANT_ID, "Karthik", "active", 0, 10),
+        ("a1111111-0000-0000-0000-0000000000a4", ABC_TENANT_ID, "Divya", "active", 0, 10),
+        ("a1111111-0000-0000-0000-0000000000a5", ABC_TENANT_ID, "Arjun", "active", 0, 10),
     ]
     xyz_execs = [
-        ("exec-xyz-vignesh", XYZ_TENANT_ID, "Vignesh", "active", 0, 10),
-        ("exec-xyz-meera", XYZ_TENANT_ID, "Meera", "active", 0, 10),
+        ("a2222222-0000-0000-0000-0000000000b1", XYZ_TENANT_ID, "Vignesh", "active", 0, 10),
+        ("a2222222-0000-0000-0000-0000000000b2", XYZ_TENANT_ID, "Meera", "active", 0, 10),
     ]
     for ex in abc_execs + xyz_execs:
         await db.execute("INSERT INTO sales_executives VALUES (?, ?, ?, ?, ?, ?)", ex)

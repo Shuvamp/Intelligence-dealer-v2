@@ -8,10 +8,10 @@ YouTube's resumable-upload chunk/retry loop by hand.
 from __future__ import annotations
 
 import asyncio
+import io
 import logging
 import time
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import BinaryIO
 
 import httpx
@@ -24,12 +24,6 @@ from googleapiclient.http import MediaIoBaseUpload
 from app.config import GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REDIRECT_URI
 
 logger = logging.getLogger(__name__)
-
-# Content Studio video attachments — written by app/routers/marketing.py's
-# /video/upload (same directory, computed the same way), served by main.py's
-# /videos static mount. Resolved back to a local path here rather than
-# fetched over HTTP, since every caller runs in this same process/host.
-VIDEOS_DIR = Path(__file__).resolve().parent.parent.parent / "generated" / "videos"
 
 # Reuse the shared CSRF state store (same in-memory map/TTL Instagram + LinkedIn use).
 from app.services.instagram import create_oauth_state, consume_oauth_state  # noqa: F401
@@ -169,7 +163,7 @@ async def get_valid_credentials(tenant_id: str, row: dict) -> Credentials:
 
     credentials, refreshed = await refresh_if_expired(row)
     if refreshed:
-        channel_store.update(
+        await channel_store.update(
             tenant_id, "youtube",
             access_token=credentials.token or "",
             token_expires_at=credentials.expiry.replace(tzinfo=timezone.utc).isoformat() if credentials.expiry else None,
@@ -223,20 +217,21 @@ async def upload_video(
         raise YouTubePublishError(f"YouTube upload failed: {e}") from e
 
 
-def _local_video_path(video_url: str | None) -> Path | None:
-    """Map a stored video_url (e.g. '.../videos/<tenant>/<file>.mp4') back to
-    its file on disk. Returns None if it isn't ours or the file is gone."""
-    if not video_url:
+async def _fetch_video_bytes(video_url: str) -> io.BytesIO | None:
+    """Fetch a stored video_url (Supabase Storage public URL) into memory.
+    Returns None on any HTTP error (covers 404s from stale pre-migration
+    local paths too).
+    # ponytail: fixed 120s timeout, switch to streaming download if
+    # large-video fetch failures show up in practice
+    """
+    try:
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            resp = await client.get(video_url)
+            resp.raise_for_status()
+            return io.BytesIO(resp.content)
+    except httpx.HTTPError as exc:
+        logger.error("[youtube:publish] fetch failed for video_url=%r (%s)", video_url, exc)
         return None
-    marker = "/videos/"
-    idx = video_url.find(marker)
-    if idx == -1:
-        return None
-    rel = video_url[idx + len(marker):]
-    candidate = (VIDEOS_DIR / rel).resolve()
-    if VIDEOS_DIR.resolve() not in candidate.parents:
-        return None  # path-traversal guard
-    return candidate if candidate.is_file() else None
 
 
 async def publish_video_from_url(
@@ -264,16 +259,15 @@ async def publish_video_from_url(
     """
     if not video_url:
         return {"status": "skipped", "reason": "video_required"}
-    video_path = _local_video_path(video_url)
-    if not video_path:
-        return {"status": "error", "error": f"video file not found on disk for video_url={video_url!r}"}
+    video_file = await _fetch_video_bytes(video_url)
+    if not video_file:
+        return {"status": "error", "error": f"could not fetch video from video_url={video_url!r}"}
 
     try:
         credentials = await get_valid_credentials(tenant_id, row)
-        with video_path.open("rb") as f:
-            result = await upload_video(
-                credentials, f, "video/*", title or "Untitled", description, [], privacy_status,
-            )
+        result = await upload_video(
+            credentials, video_file, "video/*", title or "Untitled", description, [], privacy_status,
+        )
     except YouTubePublishError as exc:
         logger.error("[youtube:publish] tenant=%s err=%s", tenant_id, exc)
         return {"status": "error", "error": str(exc)}

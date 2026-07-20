@@ -22,7 +22,7 @@ class DisconnectRequest(BaseModel):
 
 @router.get("/status")
 async def linkedin_status(tenant_id: str = Query(...)):
-    row = channel_store.get(tenant_id, "linkedin")
+    row = await channel_store.get(tenant_id, "linkedin")
     if not row:
         return {"connected": False, "handle": None, "last_sync": None}
     return {
@@ -47,7 +47,7 @@ async def linkedin_profile(tenant_id: str = Query(...)):
     Side effect: when the token is found invalid, the stored row is flipped to
     'disconnected' so the rest of the app reflects reality.
     """
-    row = channel_store.get(tenant_id, "linkedin")
+    row = await channel_store.get(tenant_id, "linkedin")
     if not row or row.get("status") != "connected" or not row.get("linkedin_id"):
         return {"state": "not_connected", "profile": None}
 
@@ -65,7 +65,7 @@ async def linkedin_profile(tenant_id: str = Query(...)):
 
     if state == "expired":
         # Token dead — mark disconnected so the card shows "Reconnect Required"
-        channel_store.update(tenant_id, "linkedin", status="disconnected", access_token="")
+        await channel_store.update(tenant_id, "linkedin", status="disconnected", access_token="")
         return {"state": "reconnect_required", "profile": stored}
 
     if state == "error":
@@ -102,7 +102,7 @@ async def linkedin_profile(tenant_id: str = Query(...)):
         "last_sync": row.get("last_sync"),
     }
     now = datetime.now(timezone.utc).isoformat()
-    channel_store.update(
+    await channel_store.update(
         tenant_id, "linkedin",
         handle=profile["name"] or row.get("handle"),
         email=profile["email"],
@@ -116,14 +116,14 @@ async def linkedin_profile(tenant_id: str = Query(...)):
 
 @router.post("/sync")
 async def linkedin_sync(req: SyncRequest):
-    row = channel_store.get(req.tenant_id, "linkedin")
+    row = await channel_store.get(req.tenant_id, "linkedin")
     if not row:
         raise HTTPException(status_code=404, detail="No LinkedIn connection found")
     if row.get("status") != "connected":
         raise HTTPException(status_code=400, detail="LinkedIn is not connected")
 
     now = datetime.now(timezone.utc).isoformat()
-    channel_store.update(req.tenant_id, "linkedin", last_sync=now)
+    await channel_store.update(req.tenant_id, "linkedin", last_sync=now)
     return {"status": "success", "last_sync": now}
 
 
@@ -157,7 +157,7 @@ async def linkedin_insights(
         "topPosts": [], "posts": [],
     }
 
-    row = channel_store.get(tenant_id, "linkedin")
+    row = await channel_store.get(tenant_id, "linkedin")
     if not row or row.get("status") != "connected" or not row.get("access_token"):
         return empty
 
@@ -242,7 +242,7 @@ async def linkedin_organizations(tenant_id: str = Query(...)):
     Only meaningful once LINKEDIN_ORG_SCOPES_ENABLED is on and the member
     reconnected with the rw_organization_admin scope — otherwise LinkedIn
     returns 403 and this surfaces "mdp_required"."""
-    row = channel_store.get(tenant_id, "linkedin")
+    row = await channel_store.get(tenant_id, "linkedin")
     if not row or row.get("status") != "connected" or not row.get("access_token"):
         raise HTTPException(status_code=404, detail="No LinkedIn connection found")
     result = await list_admin_organizations(row["access_token"])
@@ -259,10 +259,10 @@ class SelectOrganizationRequest(BaseModel):
 
 @router.post("/organizations/select")
 async def linkedin_select_organization(req: SelectOrganizationRequest):
-    row = channel_store.get(req.tenant_id, "linkedin")
+    row = await channel_store.get(req.tenant_id, "linkedin")
     if not row:
         raise HTTPException(status_code=404, detail="No LinkedIn connection found")
-    channel_store.update(
+    await channel_store.update(
         req.tenant_id, "linkedin",
         linkedin_org_urn=req.org_urn, linkedin_org_name=req.org_name,
     )
@@ -277,7 +277,7 @@ class RefreshAnalyticsRequest(BaseModel):
 async def linkedin_refresh_analytics(req: RefreshAnalyticsRequest):
     """Manually run one analytics poll for a single tenant (the dashboard's
     "Refresh analytics" button) instead of waiting for the next scheduled tick."""
-    row = channel_store.get(req.tenant_id, "linkedin")
+    row = await channel_store.get(req.tenant_id, "linkedin")
     if not row or row.get("status") != "connected" or not row.get("access_token"):
         raise HTTPException(status_code=400, detail="LinkedIn is not connected")
     from app.services.linkedin_analytics_poller import refresh_tenant
@@ -291,8 +291,8 @@ async def linkedin_refresh_analytics(req: RefreshAnalyticsRequest):
 
 @router.post("/disconnect")
 async def linkedin_disconnect(req: DisconnectRequest):
-    row = channel_store.get(req.tenant_id, "linkedin")
+    row = await channel_store.get(req.tenant_id, "linkedin")
     if not row:
         raise HTTPException(status_code=404, detail="No LinkedIn connection found")
-    channel_store.update(req.tenant_id, "linkedin", status="disconnected", access_token="")
+    await channel_store.update(req.tenant_id, "linkedin", status="disconnected", access_token="")
     return {"status": "success", "message": "LinkedIn disconnected"}

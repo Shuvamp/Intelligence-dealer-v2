@@ -14,8 +14,6 @@ node_modules/
 
 # Dev runtime artifacts
 apps/api/.uploads/
-apps/local-api/uploads/
-apps/api/adip_dev.duckdb
 
 # Logs
 *.log

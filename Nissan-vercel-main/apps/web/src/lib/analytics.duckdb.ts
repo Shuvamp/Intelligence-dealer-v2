@@ -233,83 +233,12 @@ export async function listOpportunities(
 }
 
 // ── Campaign Posts CRUD ────────────────────────────────────────────────────
-// Posts stay in a web-local DuckDB file (.duckdb/analytics.duckdb under apps/web)
-// — separate from the FastAPI-owned store, so no cross-process file lock.
+// Real Supabase public.campaign_posts (0010_marketing.sql + 0044 gapfill) —
+// same table runCompliance/setStatus/approvePost/etc. in marketing.ts already
+// read/write directly via supabase.from('campaign_posts'). post_id here maps
+// to that table's `id` column.
 
-import { Database } from 'duckdb-async'
-import path from 'node:path'
-import fs from 'node:fs'
-
-const DB_DIR = path.resolve(process.cwd(), '.duckdb')
-const DB_PATH = path.join(DB_DIR, 'analytics.duckdb')
-
-// Store on Node.js global so Vite's SSR module re-evaluation (which resets
-// module-level vars on each server function call) doesn't create a second
-// Database instance → second exclusive file lock → Windows IO error.
-declare global {
-  // eslint-disable-next-line no-var
-  var __adip_duckdb: Database | undefined
-  // eslint-disable-next-line no-var
-  var __adip_duckdb_ready: Promise<Database> | undefined
-}
-
-async function getDb(): Promise<Database> {
-  if (global.__adip_duckdb) return global.__adip_duckdb
-  // Guard against concurrent first-open calls
-  if (global.__adip_duckdb_ready) return global.__adip_duckdb_ready
-  global.__adip_duckdb_ready = (async () => {
-    if (!fs.existsSync(DB_DIR)) fs.mkdirSync(DB_DIR, { recursive: true })
-    const db = await Database.create(DB_PATH)
-    await bootstrap(db)
-    global.__adip_duckdb = db
-    return db
-  })()
-  return global.__adip_duckdb_ready
-}
-
-async function bootstrap(db: Database) {
-  const conn = await db.connect()
-  try {
-    // Campaign posts — generated content + poster, keyed by post_id
-    await conn.run(`
-      CREATE TABLE IF NOT EXISTS campaign_posts (
-        post_id          VARCHAR NOT NULL PRIMARY KEY,
-        tenant_id        VARCHAR NOT NULL,
-        campaign_id      VARCHAR,
-        title            VARCHAR,
-        caption          TEXT,
-        cta              VARCHAR,
-        hashtags         VARCHAR,
-        channel          VARCHAR,
-        status           VARCHAR NOT NULL DEFAULT 'draft',
-        compliance       VARCHAR NOT NULL DEFAULT 'unchecked',
-        compliance_score INTEGER,
-        vehicle          VARCHAR,
-        offer            VARCHAR,
-        headline         VARCHAR,
-        subheadline      VARCHAR,
-        poster_prompt    TEXT,
-        poster_url       TEXT,
-        poster_provider  VARCHAR,
-        rejection_reason VARCHAR,
-        created_by       VARCHAR,
-        created_at       TIMESTAMP NOT NULL DEFAULT now(),
-        updated_at       TIMESTAMP NOT NULL DEFAULT now()
-      )
-    `)
-    // Idempotent columns for existing DBs (swallowed if already exist)
-    await conn.run(`ALTER TABLE campaign_posts ADD COLUMN subheadline VARCHAR`).catch(() => {})
-    await conn.run(`ALTER TABLE campaign_posts ADD COLUMN poster_provider VARCHAR`).catch(() => {})
-    await conn.run(`ALTER TABLE campaign_posts ADD COLUMN compliance_score INTEGER`).catch(() => {})
-    await conn.run(`ALTER TABLE campaign_posts ADD COLUMN rejection_reason VARCHAR`).catch(() => {})
-  } finally {
-    await conn.close()
-  }
-}
-
-function joinArr(arr: string[] | null | undefined): string | null {
-  return arr && arr.length > 0 ? arr.join(',') : null
-}
+import { getSupabaseServerClient } from './supabase.server'
 
 export interface DuckPostRow {
   post_id: string
@@ -336,59 +265,44 @@ export interface DuckPostRow {
   updated_at?: string
 }
 
+function toDuckPostRow(r: Record<string, unknown>): DuckPostRow {
+  return { ...r, post_id: r['id'] } as DuckPostRow
+}
+
 export async function insertCampaignPost(row: DuckPostRow): Promise<void> {
-  const db = await getDb()
-  const conn = await db.connect()
-  try {
-    await conn.run(
-      `INSERT INTO campaign_posts
-         (post_id, tenant_id, campaign_id, title, caption, cta, hashtags,
-          channel, status, compliance, vehicle, offer, headline, subheadline,
-          poster_prompt, poster_url, poster_provider, created_by)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-      row.post_id,
-      row.tenant_id,
-      row.campaign_id   ?? null,
-      row.title         ?? null,
-      row.caption       ?? null,
-      row.cta           ?? null,
-      joinArr(row.hashtags),
-      row.channel       ?? null,
-      row.status        ?? 'draft',
-      row.compliance    ?? 'unchecked',
-      row.vehicle       ?? null,
-      row.offer         ?? null,
-      row.headline      ?? null,
-      row.subheadline   ?? null,
-      row.poster_prompt ?? null,
-      row.poster_url    ?? null,
-      row.poster_provider ?? null,
-      row.created_by    ?? null,
-    )
-  } finally {
-    await conn.close()
-  }
+  const supabase = getSupabaseServerClient()
+  const { error } = await supabase.from('campaign_posts').insert({
+    id: row.post_id,
+    tenant_id: row.tenant_id,
+    campaign_id: row.campaign_id ?? null,
+    title: row.title ?? null,
+    caption: row.caption ?? null,
+    cta: row.cta ?? null,
+    hashtags: row.hashtags ?? null,
+    channel: row.channel ?? undefined,
+    status: row.status ?? 'draft',
+    compliance: row.compliance ?? 'unchecked',
+    vehicle: row.vehicle ?? null,
+    offer: row.offer ?? null,
+    headline: row.headline ?? null,
+    subheadline: row.subheadline ?? null,
+    poster_prompt: row.poster_prompt ?? null,
+    poster_url: row.poster_url ?? null,
+    poster_provider: row.poster_provider ?? null,
+    created_by: row.created_by ?? null,
+  })
+  if (error) throw new Error(`[campaign_posts] insert failed: ${error.message}`)
 }
 
 export async function getCampaignPostById(postId: string, tenantId: string): Promise<DuckPostRow | null> {
-  const db = await getDb()
-  const conn = await db.connect()
-  try {
-    const rows = await conn.all(
-      `SELECT * FROM campaign_posts WHERE post_id = ? AND tenant_id = ?`,
-      postId, tenantId,
-    ) as Record<string, unknown>[]
-    if (!rows[0]) return null
-    const r = rows[0]
-    return {
-      ...r,
-      hashtags: typeof r['hashtags'] === 'string' && r['hashtags']
-        ? (r['hashtags'] as string).split(',').filter(Boolean)
-        : [],
-    } as DuckPostRow
-  } finally {
-    await conn.close()
-  }
+  const supabase = getSupabaseServerClient()
+  const { data } = await supabase
+    .from('campaign_posts')
+    .select('*')
+    .eq('id', postId)
+    .eq('tenant_id', tenantId)
+    .maybeSingle()
+  return data ? toDuckPostRow(data) : null
 }
 
 export async function updateCampaignPost(
@@ -398,59 +312,35 @@ export async function updateCampaignPost(
     'poster_prompt' | 'poster_url' | 'poster_provider' |
     'status' | 'compliance' | 'compliance_score' | 'rejection_reason'>>,
 ): Promise<void> {
-  const fields = Object.keys(updates).filter(k => k in updates)
-  if (fields.length === 0) return
-  const db = await getDb()
-  const conn = await db.connect()
-  try {
-    const setClauses = fields.map(f => `${f} = ?`).join(', ')
-    const values = fields.map(f => (updates as Record<string, unknown>)[f] ?? null)
-    await conn.run(
-      `UPDATE campaign_posts SET ${setClauses}, updated_at = now()
-       WHERE post_id = ? AND tenant_id = ?`,
-      ...values, postId, tenantId,
-    )
-  } finally {
-    await conn.close()
-  }
+  if (Object.keys(updates).length === 0) return
+  const supabase = getSupabaseServerClient()
+  const { error } = await supabase
+    .from('campaign_posts')
+    .update({ ...updates, updated_at: new Date().toISOString() })
+    .eq('id', postId)
+    .eq('tenant_id', tenantId)
+  if (error) throw new Error(`[campaign_posts] update failed: ${error.message}`)
 }
 
 export async function listCampaignPostsByTenant(tenantId: string): Promise<DuckPostRow[]> {
-  const db = await getDb()
-  const conn = await db.connect()
-  try {
-    const rows = await conn.all(
-      `SELECT * FROM campaign_posts WHERE tenant_id = ? ORDER BY created_at DESC`,
-      tenantId,
-    ) as Record<string, unknown>[]
-    return rows.map(r => ({
-      ...r,
-      hashtags: typeof r['hashtags'] === 'string' && r['hashtags']
-        ? (r['hashtags'] as string).split(',').filter(Boolean)
-        : [],
-    })) as DuckPostRow[]
-  } finally {
-    await conn.close()
-  }
+  const supabase = getSupabaseServerClient()
+  const { data } = await supabase
+    .from('campaign_posts')
+    .select('*')
+    .eq('tenant_id', tenantId)
+    .order('created_at', { ascending: false })
+  return (data ?? []).map(toDuckPostRow)
 }
 
 export async function listCampaignPostsByCampaign(campaignId: string, tenantId: string): Promise<DuckPostRow[]> {
-  const db = await getDb()
-  const conn = await db.connect()
-  try {
-    const rows = await conn.all(
-      `SELECT * FROM campaign_posts WHERE campaign_id = ? AND tenant_id = ? ORDER BY created_at DESC`,
-      campaignId, tenantId,
-    ) as Record<string, unknown>[]
-    return rows.map(r => ({
-      ...r,
-      hashtags: typeof r['hashtags'] === 'string' && r['hashtags']
-        ? (r['hashtags'] as string).split(',').filter(Boolean)
-        : [],
-    })) as DuckPostRow[]
-  } finally {
-    await conn.close()
-  }
+  const supabase = getSupabaseServerClient()
+  const { data } = await supabase
+    .from('campaign_posts')
+    .select('*')
+    .eq('campaign_id', campaignId)
+    .eq('tenant_id', tenantId)
+    .order('created_at', { ascending: false })
+  return (data ?? []).map(toDuckPostRow)
 }
 
 // ── Analytics (read-only aggregations) ────────────────────────────────────

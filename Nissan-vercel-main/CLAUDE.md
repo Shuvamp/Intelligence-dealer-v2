@@ -11,12 +11,10 @@ Multi-tenant SaaS: the operating system for car dealerships. Phase 1 customer: N
 - **Frontend:** TanStack Start (React) — `apps/web`
 - **Backend API:** FastAPI (Python) — `apps/api`
 - **AI / Agents:** LangGraph (Python) — `apps/api/agents/`
-- **Dev DB:** DuckDB in-memory shim — `apps/local-api/` (local dev ONLY, not production)
+- **Dev DB:** local Supabase (`supabase start`) — same as prod
 - **Prod DB:** Supabase PostgreSQL
 
 > **Rule:** All new backend APIs and AI agents MUST use FastAPI + Python LangGraph.
-> Node.js (`apps/local-api`) is a local dev shim only — it is NOT the production backend.
-> Exception needed for any new Node.js backend work.
 
 ## Hard Rules
 - Multi-tenant, two-level: **tenant (dealer) → location (showroom)**. Every domain table has `tenant_id`.
@@ -35,7 +33,7 @@ Multi-tenant SaaS: the operating system for car dealerships. Phase 1 customer: N
 ## Lead Intake Pipeline (multi-agent — built by the team)
 **Before editing any intake/agent code, read `docs/LEAD-PIPELINE.md`.** Leads from
 the website form + Facebook/Instagram demos flow through ONE pipeline of 4 plain-async
-agent nodes, in order: `validate → normalize → score → assign → DuckDB`.
+agent nodes, in order: `validate → normalize → score → assign → Supabase`.
 - Orchestrator (wires the nodes): `apps/api/agents/intake_pipeline/graph.py` — **do not edit**.
 - Shared contract (state + I/O shapes): `apps/api/agents/intake_pipeline/contracts.py` — **read-only**.
 - One node per file under `apps/api/agents/intake_pipeline/nodes/`; each owner edits ONLY their node:
@@ -52,33 +50,22 @@ Given a lead it picks the next best action (call/whatsapp/email/test_drive/manag
 drafts an outreach message (Groq `llama-3.1-8b-instant`, deterministic fallback — no key needed),
 logs an `nba` event on the lead's timeline, and notifies the assignee. Competitor handling: if the
 customer named a rival, it weaves in 1–2 Nissan advantages without naming the rival.
-- Endpoint: `POST /followup/{lead_id}` (FastAPI, port 8000). Data access is over PostgREST to the shim.
+- Endpoint: `POST /followup/{lead_id}` (FastAPI, port 8000). Data access is over PostgREST to Supabase.
 - UI: the **"Generate follow-up"** button on the lead detail page (`/leads/$leadId`) → server fn
   `runFollowup` (`apps/web/src/lib/followup.ts`) → the endpoint; the NBA event then shows in the timeline.
 
-## Local dev — DEFAULT: DuckDB (no Docker/Supabase CLI needed)
-For day-to-day development, use the **DuckDB shim** in `apps/local-api` — a small Express
-server that speaks Supabase's Auth + PostgREST API, backed by in-memory DuckDB. The web app
-runs **unchanged**; only `VITE_SUPABASE_URL` points at it. Use this unless you specifically
-need real Supabase/RLS.
-
-```bash
-npm run setup        # installs root + apps/local-api + apps/web deps; writes apps/web/.env.local
-npm run setup:agent  # once: creates apps/api/.venv + installs FastAPI agent deps (needs Python 3.12 + uv)
-npm run dev          # starts DuckDB shim (:54321) + web (:3000) + FastAPI agents (:8000)
-```
-- `npm run dev` now also launches the FastAPI agent service (`apps/api`, port 8000) so the
-  intake pipeline and the Leads follow-up agent work out of the box. (`dev:agent` runs it alone.)
-- Non-Windows: the `dev:agent` script's venv path is `apps/api/.venv/bin/python` (the committed
-  script uses the Windows `Scripts` path).
-- `apps/web/.env.local` is auto-generated to point at `http://localhost:54321` (zero config).
-- Demo logins (password `Passw0rd!23`): `owner@abcnissan.test`, `manager@abcnissan.test`, `sales@xyznissan.test`.
-- Details, supported query shapes, and caveats: `apps/local-api/README.md`.
-- **The shim does NOT enforce RLS** — tenant-isolation behavior must be verified against real Supabase.
-
-## Local dev — production-parity (real Supabase)
+## Local dev — real Supabase (only supported path)
 - Container runtime: **colima** (`colima start`), Docker CLI client.
 - `supabase start` boots the local stack. Migrations in `supabase/migrations/`. Seed in `supabase/seed.sql`.
 - `supabase db reset` re-applies migrations + seed. `supabase test db` runs pgTAP tests.
 - Studio: http://localhost:54323
-- To use it from the web app, set the real `VITE_SUPABASE_URL` + `VITE_SUPABASE_ANON_KEY` in `apps/web/.env.local`.
+
+```bash
+supabase start        # once per boot: local Postgres + Auth + PostgREST + Storage
+npm run setup          # installs root + apps/web deps; writes apps/web/.env.local from `supabase status`
+npm run setup:agent    # once: creates apps/api/.venv + installs FastAPI agent deps (needs Python 3.12 + uv)
+npm run dev            # starts web (:3000) + FastAPI agents (:8000) against local Supabase
+```
+- `apps/web/.env.local` is auto-generated from `supabase status -o env` (real local `API_URL`/`ANON_KEY`).
+- Demo logins (password `Passw0rd!23`): `owner@abcnissan.test`, `manager@abcnissan.test`, `sales@xyznissan.test`.
+- RLS is enforced — tenant-isolation behavior matches production.

@@ -21,8 +21,9 @@ dist/
 
 # Call Intelligence (Phase 5) — uploaded recordings + downloaded whisper models
 apps/api/.uploads/
-# Runtime upload artifacts (WhatsApp media, etc.) — not source
-apps/local-api/uploads/
+
+# Media Library — assets live in Supabase Storage, never on local disk
+apps/web/public/uploads/
 
 # web
 apps/web/.verify/

@@ -34,7 +34,7 @@ async def list_channels(tenant_id: str = Query(...)):
     Connected channels come from the local store; the rest default to disconnected.
     Shape matches the frontend ChannelConnection type (incl. account_id/account_name).
     """
-    rows = {r["channel"]: r for r in channel_store.list_for_tenant(tenant_id)}
+    rows = {r["channel"]: r for r in await channel_store.list_for_tenant(tenant_id)}
     result = []
     for channel in _ALL_CHANNELS:
         row = rows.get(channel)
