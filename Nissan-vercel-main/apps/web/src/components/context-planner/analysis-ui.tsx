@@ -9,9 +9,9 @@ import { Badge, Panel, PanelHeader } from '#/components/ui/kit'
 import { cn } from '#/lib/utils'
 
 // Shared status vocabulary for SEO dimensions + AEO agents (identical union).
-export type CheckStatus = 'PASS' | 'WARNING' | 'FAIL'
+type CheckStatus = 'PASS' | 'WARNING' | 'FAIL'
 
-export type ScoreTone = 'emerald' | 'sky' | 'amber' | 'rose'
+type ScoreTone = 'emerald' | 'sky' | 'amber' | 'rose'
 
 export function scoreTone(score: number): ScoreTone {
   if (score >= 90) return 'emerald'

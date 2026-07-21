@@ -1,16 +1,12 @@
 import { createServerFn } from '@tanstack/react-start'
 import { getSupabaseServerClient } from './supabase.server'
 import type {
-  Campaign,
   CampaignObjective,
   CampaignPlanInput,
   CampaignPlanResult,
-  CampaignPost,
-  CampaignScorecard,
   CampaignStatus,
   CampaignSummary,
   ContentStatus,
-  MarketingOverview,
   MediaAsset,
   MonthOpportunity,
   MonthPlan,
@@ -20,7 +16,6 @@ import type {
   PostChannel,
   PostStatus,
   PublishResult,
-  RecommendedCampaign,
   SelectedAsset,
   YouTubeStatus,
 } from './types'
@@ -103,61 +98,6 @@ const MONTH_LABEL = [
   'July', 'August', 'September', 'October', 'November', 'December',
 ]
 
-
-export const getMonthPlan = createServerFn({ method: 'GET' })
-  .validator((d: { month: number; year: number }) => d)
-  .handler(async ({ data }): Promise<MonthPlan> => {
-    const month = Math.min(12, Math.max(1, data.month || 1))
-    const year = data.year || new Date().getFullYear()
-    try {
-      const res = await fetch(`${FASTAPI_URL}/marketing/calendar/month-plan?month=${month}&year=${year}`)
-      if (res.ok) {
-        const json = await res.json() as { opportunities: MonthPlan['opportunities'] }
-        return { month, label: MONTH_LABEL[month], opportunities: json.opportunities ?? [] }
-      }
-    } catch { /* fall through */ }
-    return { month, label: MONTH_LABEL[month], opportunities: [] }
-  })
-
-// =====================================================================
-// AGENT 2 — Marketing Strategy (basic): prioritized campaign ideas.
-// Rule-based over a simple inventory/objective heuristic for V1.
-// =====================================================================
-export const getRecommendedCampaigns = createServerFn({ method: 'GET' }).handler(
-  async (): Promise<Array<RecommendedCampaign>> => {
-    try {
-      const res = await fetch(`${FASTAPI_URL}/marketing/campaigns/recommended`)
-      if (res.ok) return res.json() as Promise<Array<RecommendedCampaign>>
-    } catch { /* fall through */ }
-    return []
-  },
-)
-
-// =====================================================================
-// Reads — campaigns, calendar, approval queue, scorecard, overview
-// =====================================================================
-export const getMarketingOverview = createServerFn({ method: 'GET' }).handler(
-  async (): Promise<MarketingOverview> => {
-    const supabase = getSupabaseServerClient()
-    const [camps, posts, insights] = await Promise.all([
-      supabase.from('campaigns').select('status'),
-      supabase.from('campaign_posts').select('status, published_at'),
-      supabase.from('campaign_insights').select('leads_generated, spend'),
-    ])
-    const postRows = posts.data ?? []
-    const ins = insights.data ?? []
-    const leads = ins.reduce((t: number, r: any) => t + (r.leads_generated ?? 0), 0)
-    const spend = ins.reduce((t: number, r: any) => t + Number(r.spend ?? 0), 0)
-    return {
-      activeCampaigns: (camps.data ?? []).filter((c: any) => c.status === 'active').length,
-      contentInPipeline: postRows.filter((p: any) => ['draft', 'pending_approval', 'approved'].includes(p.status)).length,
-      pendingApproval: postRows.filter((p: any) => p.status === 'pending_approval').length,
-      publishedThisMonth: postRows.filter((p: any) => p.status === 'published').length,
-      leadsAttributed: leads,
-      costPerLead: leads ? Math.round(spend / leads) : 0,
-    }
-  },
-)
 
 // =====================================================================
 // Executive analytics dashboard — REAL DATA ONLY.
@@ -786,103 +726,6 @@ export const getDuckCampaignDays = createServerFn({ method: 'GET' }).handler(
   },
 )
 
-// Direct post lookup by campaign_id — works for DuckDB-backed campaigns
-// because it skips the Supabase campaigns table entirely.
-export const getCampaignPosts = createServerFn({ method: 'GET' })
-  .validator((d: { campaign_id: string }) => d)
-  .handler(async ({ data }): Promise<Array<CampaignPost>> => {
-    const supabase = getSupabaseServerClient()
-    const { data: posts } = await supabase
-      .from('campaign_posts')
-      .select('*')
-      .eq('campaign_id', data.campaign_id)
-      .order('created_at', { ascending: false })
-    return (posts ?? []) as Array<CampaignPost>
-  })
-
-export const getCampaign = createServerFn({ method: 'GET' })
-  .validator((d: { id: string }) => d)
-  .handler(async ({ data }): Promise<{ campaign: Campaign; posts: Array<CampaignPost>; scorecard: CampaignScorecard | null } | null> => {
-    const supabase = getSupabaseServerClient()
-    const { data: campaign } = await supabase.from('campaigns').select('*').eq('id', data.id).single()
-    if (!campaign) return null
-    const { data: posts } = await supabase.from('campaign_posts').select('*').eq('campaign_id', data.id).order('created_at', { ascending: false })
-    const { data: ins } = await supabase.from('campaign_insights').select('*').eq('campaign_id', data.id).order('captured_at', { ascending: false }).limit(1).maybeSingle()
-    return {
-      campaign,
-      posts: (posts ?? []) as Array<CampaignPost>,
-      scorecard: ins ? ({ ...ins, campaign_name: campaign.name } as CampaignScorecard) : null,
-    }
-  })
-
-export const getContentCalendar = createServerFn({ method: 'GET' }).handler(
-  async (): Promise<Array<CampaignPost>> => {
-    const supabase = getSupabaseServerClient()
-    const { data } = await supabase
-      .from('campaign_posts')
-      .select('*, campaign:campaigns(name)')
-      .not('scheduled_at', 'is', null)
-      .order('scheduled_at', { ascending: true })
-    return (data ?? []).map((r: any) => {
-      const { campaign, ...rest } = r
-      return { ...rest, campaign_name: campaign?.name ?? null }
-    })
-  },
-)
-
-export const getApprovalQueue = createServerFn({ method: 'GET' }).handler(
-  async (): Promise<Array<CampaignPost>> => {
-    const supabase = getSupabaseServerClient()
-    const { data } = await supabase
-      .from('campaign_posts')
-      .select('*, campaign:campaigns(name)')
-      .eq('status', 'pending_approval')
-      .order('created_at', { ascending: true })
-    return (data ?? []).map((r: any) => {
-      const { campaign, ...rest } = r
-      return { ...rest, campaign_name: campaign?.name ?? null }
-    })
-  },
-)
-
-export const getCampaignScorecard = createServerFn({ method: 'GET' })
-  .validator((d: { id: string }) => d)
-  .handler(async ({ data }): Promise<CampaignScorecard | null> => {
-    const supabase = getSupabaseServerClient()
-    const { data: ins } = await supabase.from('campaign_insights').select('*').eq('campaign_id', data.id).order('captured_at', { ascending: false }).limit(1).maybeSingle()
-    if (!ins) return null
-    const { data: c } = await supabase.from('campaigns').select('name').eq('id', data.id).single()
-    return { ...ins, campaign_name: c?.name ?? 'Campaign' } as CampaignScorecard
-  })
-
-// =====================================================================
-// AGENT 8 — Marketing Copilot (basic): rule-based NL recommendation.
-// =====================================================================
-export const marketingCopilot = createServerFn({ method: 'GET' })
-  .validator((d: { question: string }) => d)
-  .handler(async ({ data }): Promise<{ answer: string }> => {
-    const supabase = getSupabaseServerClient()
-    const { data: ins } = await supabase
-      .from('campaign_insights')
-      .select('campaign_id, leads_generated, conversion_rate, cost_per_lead, campaigns(name)')
-      .order('leads_generated', { ascending: false })
-    const rows = (ins ?? []) as any[]
-    const q = data.question.toLowerCase()
-    if (rows.length === 0) return { answer: 'No campaign performance data yet. Launch a campaign to see recommendations.' }
-    const best = rows[0]
-    const name = best.campaigns?.name ?? 'your top campaign'
-    if (q.includes('best') || q.includes('perform')) {
-      return { answer: `“${name}” performed best — ${best.leads_generated} leads at a ${Number(best.conversion_rate)}% conversion rate and ₹${best.cost_per_lead} cost per lead.` }
-    }
-    if (q.includes('next') || q.includes('should')) {
-      return { answer: `Run a Magnite-focused festive campaign next — it’s your highest-intent vehicle. Mirror the structure of “${name}”, which delivered your best cost per lead.` }
-    }
-    if (q.includes('vehicle') || q.includes('promote')) {
-      return { answer: 'Promote the Magnite (compact SUV) — it drives the most leads — and bundle the X-Trail for the premium SUV segment.' }
-    }
-    return { answer: `Your strongest campaign is “${name}” (${best.leads_generated} leads). Double down on that vehicle and festive timing.` }
-  })
-
 // =====================================================================
 // Mutations — AGENTS 3,4,5,6 (Content / Poster / Compliance / Publishing)
 // =====================================================================
@@ -975,89 +818,6 @@ export const generateContent = createServerFn({ method: 'POST' })
     })
     return { ok: true as const, id: postId, headline, subheadline, caption, hashtags, cta }
   })
-
-// AGENT 5 — Brand Compliance (basic rule checks).
-export const runCompliance = createServerFn({ method: 'POST' })
-  .validator((d: { post_id: string }) => d)
-  .handler(async ({ data }) => {
-    const supabase = getSupabaseServerClient()
-    const { data: post } = await supabase.from('campaign_posts').select('caption, hashtags, offer').eq('id', data.post_id).single()
-    const flags: Array<string> = []
-    const caption = post?.caption ?? ''
-    const tags = (post?.hashtags ?? []) as Array<string>
-    if (!/nissan/i.test(caption) && !tags.some((t) => /nissan/i.test(t))) flags.push('Missing Nissan branding')
-    if (caption.length > 280) flags.push('Caption too long for the channel')
-    const compliance = flags.length ? 'flagged' : 'approved'
-    await supabase.from('campaign_posts').update({ compliance, updated_at: new Date().toISOString() }).eq('id', data.post_id)
-    return { ok: true as const, compliance, flags }
-  })
-
-async function setStatus(post_id: string, status: PostStatus, extra: Record<string, unknown> = {}) {
-  const supabase = getSupabaseServerClient()
-  await authCtx(supabase)
-  await supabase.from('campaign_posts').update({ status, updated_at: new Date().toISOString(), ...extra }).eq('id', post_id)
-  return { ok: true as const, status }
-}
-
-export const submitForApproval = createServerFn({ method: 'POST' })
-  .validator((d: { id: string }) => d)
-  .handler(async ({ data }) => setStatus(data.id, 'pending_approval'))
-
-export const approvePost = createServerFn({ method: 'POST' })
-  .validator((d: { id: string }) => d)
-  .handler(async ({ data }) => {
-    const supabase = getSupabaseServerClient()
-    const { userId } = await authCtx(supabase)
-    return setStatus(data.id, 'approved', { approved_by: userId })
-  })
-
-export const rejectPost = createServerFn({ method: 'POST' })
-  .validator((d: { id: string }) => d)
-  .handler(async ({ data }) => setStatus(data.id, 'rejected'))
-
-export const requestChangesPost = createServerFn({ method: 'POST' })
-  .validator((d: { id: string; feedback?: string }) => d)
-  .handler(async ({ data }) => setStatus(data.id, 'draft'))
-
-export const schedulePost = createServerFn({ method: 'POST' })
-  .validator((d: { id: string; scheduled_at: string }) => d)
-  .handler(async ({ data }) => setStatus(data.id, 'scheduled', { scheduled_at: data.scheduled_at }))
-
-// AGENT 6 — Publishing (MOCKED): marks published, no real channel push.
-export const publishPost = createServerFn({ method: 'POST' })
-  .validator((d: { id: string }) => d)
-  .handler(async ({ data }) => setStatus(data.id, 'published', { published_at: new Date().toISOString() }))
-
-export const getPublishingQueue = createServerFn({ method: 'GET' }).handler(
-  async (): Promise<Array<CampaignPost>> => {
-    const supabase = getSupabaseServerClient()
-    const { data } = await supabase
-      .from('campaign_posts')
-      .select('*, campaign:campaigns(name)')
-      .in('status', ['approved', 'scheduled'])
-      .order('created_at', { ascending: true })
-    return (data ?? []).map((r: any) => {
-      const { campaign, ...rest } = r
-      return { ...rest, campaign_name: campaign?.name ?? null }
-    })
-  },
-)
-
-export const getPublishedLog = createServerFn({ method: 'GET' }).handler(
-  async (): Promise<Array<CampaignPost>> => {
-    const supabase = getSupabaseServerClient()
-    const { data } = await supabase
-      .from('campaign_posts')
-      .select('*, campaign:campaigns(name)')
-      .eq('status', 'published')
-      .order('published_at', { ascending: false })
-      .limit(50)
-    return (data ?? []).map((r: any) => {
-      const { campaign, ...rest } = r
-      return { ...rest, campaign_name: campaign?.name ?? null }
-    })
-  },
-)
 
 // =====================================================================
 // Media Library — Supabase Postgres (marketing_assets table + Storage)
@@ -1470,36 +1230,6 @@ export async function publishYouTubeVideo(
   }
   return res.json() as Promise<{ status: string; video_id?: string; video_url?: string; error?: string }>
 }
-
-/**
- * Publish a creative to every connected channel (LinkedIn real; IG/FB graceful).
- * Returns a per-platform status map. One platform's failure does not block others.
- */
-export const publishToConnectedChannels = createServerFn({ method: 'POST' })
-  .validator((d: {
-    caption: string
-    image_url?: string
-    image_base64?: string
-    title?: string
-    description?: string
-    platforms?: Array<string>
-    video_url?: string
-    privacy_status?: string
-  }) => d)
-  .handler(async ({ data }): Promise<PublishResult> => {
-    const supabase = getSupabaseServerClient()
-    const { tenantId } = await authCtx(supabase)
-    const response = await fetch(`${FASTAPI_URL}/api/publish`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tenant_id: tenantId, ...data }),
-    })
-    if (!response.ok) {
-      const body = await response.json().catch(() => ({})) as Record<string, string>
-      throw new Error(body['detail'] ?? `Publish failed: ${response.statusText}`)
-    }
-    return (await response.json()) as PublishResult
-  })
 
 /**
  * Publish an approved group (a campaign = all its days, or one event) to the
@@ -2197,16 +1927,6 @@ export const rejectCampaign = createServerFn({ method: 'POST' })
     return { ok: true }
   })
 
-export const publishCampaign = createServerFn({ method: 'POST' })
-  .validator((d: { campaign_id: string }) => d)
-  .handler(async ({ data }): Promise<{ ok: true }> => {
-    const supabase = getSupabaseServerClient()
-    const { tenantId } = await authCtx(supabase)
-    const { publishCampaignDb } = await import('./analytics.duckdb')
-    await publishCampaignDb(data.campaign_id, tenantId)
-    return { ok: true }
-  })
-
 export const approveEvent = createServerFn({ method: 'POST' })
   .validator((d: { id: string; post_time?: string }) => d)
   .handler(async ({ data }): Promise<{ ok: true }> => {
@@ -2224,16 +1944,6 @@ export const rejectEvent = createServerFn({ method: 'POST' })
     const { tenantId } = await authCtx(supabase)
     const { rejectEventDb } = await import('./analytics.duckdb')
     await rejectEventDb(data.id, tenantId)
-    return { ok: true }
-  })
-
-export const publishEvent = createServerFn({ method: 'POST' })
-  .validator((d: { id: string }) => d)
-  .handler(async ({ data }): Promise<{ ok: true }> => {
-    const supabase = getSupabaseServerClient()
-    const { tenantId } = await authCtx(supabase)
-    const { publishEventDb } = await import('./analytics.duckdb')
-    await publishEventDb(data.id, tenantId)
     return { ok: true }
   })
 
@@ -2268,79 +1978,6 @@ export const getPublishing = createServerFn({ method: 'GET' }).handler(
   },
 )
 
-// =====================================================================
-// DuckDB Analytics — snapshot campaign planner page to analytical store
-// =====================================================================
-
-export const snapshotCampaignPlannerPage = createServerFn({ method: 'POST' })
-  .validator((d: {
-    month: number
-    year: number
-    campaigns: Array<{
-      id: string; name: string; objective: string; status: string
-      start_date: string | null; end_date: string | null
-      postCount: number; publishedCount: number; channels: string[]
-    }>
-    opportunities: Array<{
-      date: string; name: string; kind: string; theme: string; suggestion: string
-    }>
-  }) => d)
-  .handler(async ({ data }) => {
-    const { upsertCampaigns, upsertOpportunities } = await import('./analytics.duckdb')
-    const supabase = getSupabaseServerClient()
-    const { tenantId } = await authCtx(supabase)
-
-    await upsertCampaigns(
-      data.campaigns.map((c) => ({
-        campaign_id: c.id,
-        tenant_id: tenantId,
-        name: c.name,
-        objective: c.objective,
-        status: c.status,
-        start_date: c.start_date ?? null,
-        end_date: c.end_date ?? null,
-        post_count: c.postCount,
-        published_count: c.publishedCount,
-        channels: c.channels ?? [],
-        theme: null,
-        campaign_color: null,
-        campaign_hashtags: [],
-        posting_time: null,
-        vehicle: null,
-        goal: null,
-      })),
-    )
-
-    await upsertOpportunities(
-      data.opportunities.map((o) => ({
-        id: `${tenantId}_${o.date}_${o.name.replace(/\s+/g, '_')}`,
-        tenant_id: tenantId,
-        month: data.month,
-        year: data.year,
-        date: o.date,
-        name: o.name,
-        kind: o.kind,
-        theme: o.theme,
-        suggestion: o.suggestion,
-      })),
-    )
-
-    return { ok: true, campaigns_saved: data.campaigns.length, opportunities_saved: data.opportunities.length }
-  })
-
-export const queryCampaignAnalytics = createServerFn({ method: 'GET' })
-  .validator((d: { month?: number; year?: number }) => d)
-  .handler(async () => {
-    const { listCampaigns, queryObjectiveBreakdown } = await import('./analytics.duckdb')
-    const supabase = getSupabaseServerClient()
-    const { tenantId } = await authCtx(supabase)
-    const [rows, breakdown] = await Promise.all([
-      listCampaigns(tenantId),
-      queryObjectiveBreakdown(tenantId),
-    ])
-    return { rows, breakdown }
-  })
-
 // ── Campaign wizard AI-suggest helpers (FastAPI / NVIDIA NIM) ────────────────
 
 export const suggestCampaignDescription = createServerFn({ method: 'POST' })
@@ -2359,28 +1996,6 @@ export const suggestCampaignDescription = createServerFn({ method: 'POST' })
       if (!res.ok) return null
       const json = await res.json() as { description: string | null }
       return json.description ?? null
-    } catch {
-      return null
-    }
-  })
-
-export const suggestCampaignHashtags = createServerFn({ method: 'POST' })
-  .validator((d: { campaign_name: string; campaign_type: string; region?: string; occasion?: string }) => d)
-  .handler(async ({ data }): Promise<string[] | null> => {
-    try {
-      const res = await fetch(`${FASTAPI_URL}/marketing/campaign/suggest-hashtags`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          campaign_name: data.campaign_name,
-          campaign_type: data.campaign_type,
-          region: data.region ?? 'Tamil Nadu',
-          occasion: data.occasion ?? '',
-        }),
-      })
-      if (!res.ok) return null
-      const json = await res.json() as { hashtags: string[] }
-      return Array.isArray(json.hashtags) ? json.hashtags : null
     } catch {
       return null
     }

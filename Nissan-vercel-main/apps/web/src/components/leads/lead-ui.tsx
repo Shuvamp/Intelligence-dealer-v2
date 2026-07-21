@@ -65,7 +65,7 @@ export function priorityOf(score: LeadScoreBand): LeadPriority {
 // Lower rank sorts first — Hot leads float to the top.
 export const PRIORITY_RANK: Record<LeadPriority, number> = { hot: 0, warm: 1, cold: 2 }
 
-export const PRIORITY_META: Record<LeadPriority, { label: string; cls: string; dot: string }> = {
+const PRIORITY_META: Record<LeadPriority, { label: string; cls: string; dot: string }> = {
   hot:  { label: 'Hot',  cls: 'bg-rose-50 text-rose-700 ring-1 ring-inset ring-rose-200', dot: 'bg-rose-500' },
   warm: { label: 'Warm', cls: 'bg-amber-50 text-amber-700 ring-1 ring-inset ring-amber-200', dot: 'bg-amber-500' },
   cold: { label: 'Cold', cls: 'bg-sky-50 text-sky-700 ring-1 ring-inset ring-sky-200', dot: 'bg-sky-500' },

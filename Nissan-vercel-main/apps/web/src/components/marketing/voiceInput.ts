@@ -11,9 +11,9 @@
 //   2. Register it in getVoiceProvider().
 //   3. Flip the default id (or expose a setting). UI code stays unchanged.
 
-export type VoiceProviderId = 'browser' | 'whisper' | 'azure' | 'google'
+type VoiceProviderId = 'browser' | 'whisper' | 'azure' | 'google'
 
-export interface VoiceCallbacks {
+interface VoiceCallbacks {
   /** Recognition object created, before audio. */
   onStart?: () => void
   /** Microphone audio capture began. */
@@ -32,7 +32,7 @@ export interface VoiceCallbacks {
   onEnd?: () => void
 }
 
-export interface VoiceStartOptions {
+interface VoiceStartOptions {
   lang?: string
 }
 
@@ -40,7 +40,7 @@ export interface VoiceSession {
   stop: () => void
 }
 
-export interface VoiceProvider {
+interface VoiceProvider {
   id: VoiceProviderId
   /** True if this provider can run in the current environment. */
   isSupported: () => boolean
