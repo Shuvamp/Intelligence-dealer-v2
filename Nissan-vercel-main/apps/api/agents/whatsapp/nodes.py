@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 _data = WhatsAppData()
 
 
-def _provider_for_tenant(tenant_id: str):
+async def _provider_for_tenant(tenant_id: str):
     """Prefer the tenant's UI-connected creds (channel_store) over env.
 
     When the tenant connected WhatsApp from the Channels page, page_id holds the
@@ -30,7 +30,7 @@ def _provider_for_tenant(tenant_id: str):
     try:
         from app.services import channel_store  # app pkg is on sys.path alongside agents
 
-        row = channel_store.get(tenant_id, "whatsapp")
+        row = await channel_store.get(tenant_id, "whatsapp")
         if row and row.get("status") == "connected" and row.get("access_token") and row.get("page_id"):
             return MetaWhatsAppProvider(
                 access_token=row["access_token"], phone_number_id=row["page_id"]
@@ -77,7 +77,7 @@ async def send_message_node(state: WhatsAppState) -> dict:
         errors.append("send_failed:empty_message")
         return {"wamid": None, "provider_used": "none", "errors": errors}
 
-    provider = _provider_for_tenant(state.get("tenant_id", ""))
+    provider = await _provider_for_tenant(state.get("tenant_id", ""))
     provider_name = type(provider).__name__.replace("WhatsAppProvider", "").lower()
 
     async def _send(p) -> dict:

@@ -238,6 +238,7 @@ async def node_write_nba(state: FollowupState) -> dict:
         try:
             await _data.create_notification(
                 tenant_id=state["tenant_id"],
+                user_id=assignee_id,
                 title=f"Action needed: {vehicle}",
                 message=(
                     f"{exec_name}, {action.upper()}: "

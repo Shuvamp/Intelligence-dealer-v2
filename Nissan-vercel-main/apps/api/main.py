@@ -171,8 +171,15 @@ async def _resolve_assignee(client, tenant_id: str, assignment: dict) -> dict:
 _sse_clients: set[asyncio.Queue] = set()
 
 
+# All broadcasts below are consumed by the frontend's plain `es.onmessage`
+# handlers (leads.index.tsx, dashboard.tsx, leads.$leadId.tsx), which only fire
+# for the default SSE "message" event — a custom `event: <name>` line makes the
+# browser dispatch a same-named event type instead, which onmessage never sees.
+# So these are sent as plain `data: {...}` with the discriminator folded into
+# the JSON payload's own "type" field, which is what every consumer actually
+# switches on.
 def _broadcast_lead(lead_data: dict) -> None:
-    msg = f"event: new_lead\ndata: {json.dumps(lead_data)}\n\n"
+    msg = f"data: {json.dumps({'type': 'new_lead', **lead_data})}\n\n"
     dead: set[asyncio.Queue] = set()
     for q in _sse_clients:
         try:
@@ -182,11 +189,8 @@ def _broadcast_lead(lead_data: dict) -> None:
     _sse_clients.difference_update(dead)
 
 
-# Lead Board UI (Phase 2) — mirrors _broadcast_lead's pattern for stage moves.
-# This FastAPI endpoint exists for parity/consistency, not because anything
-# calls it yet in the current local-dev wiring.
 def _broadcast_stage_change(data: dict) -> None:
-    msg = f"event: stage_change\ndata: {json.dumps(data)}\n\n"
+    msg = f"data: {json.dumps({'type': 'stage_change', **data})}\n\n"
     dead: set[asyncio.Queue] = set()
     for q in _sse_clients:
         try:
@@ -200,9 +204,11 @@ def _broadcast_stage_change(data: dict) -> None:
 # decision is made AND persisted inside this same request (unlike
 # stage_change, whose write happens in apps/web), so no separate
 # broadcast-only endpoint is needed — POST /workflow/{lead_id} below calls
-# this directly after running the agent.
+# this directly after running the agent. No frontend consumer currently reads
+# "workflow_action" events, but this is fixed to the same wire format as the
+# others so a future one isn't quietly broken from day one.
 def _broadcast_workflow_action(data: dict) -> None:
-    msg = f"event: workflow_action\ndata: {json.dumps(data)}\n\n"
+    msg = f"data: {json.dumps({'type': 'workflow_action', **data})}\n\n"
     dead: set[asyncio.Queue] = set()
     for q in _sse_clients:
         try:
@@ -842,6 +848,9 @@ async def intake_lead(body: IntakeLeadRequest):
             )
 
     # broadcast SSE event to connected dashboard clients
+    # "lead" is nested because that's the shape leads.index.tsx/dashboard.tsx
+    # actually read (payload.lead.customer_name etc.) — the flat fields are
+    # kept alongside for any other consumer.
     _broadcast_lead(
         {
             "id": lead_id,
@@ -856,6 +865,12 @@ async def intake_lead(body: IntakeLeadRequest):
             "contact_medium": normalized.get("contact_medium"),
             "test_drive_required": normalized.get("test_drive_required"),
             "created_at": now,
+            "lead": {
+                "customer_name": normalized["name"],
+                "vehicle_interest": normalized.get("vehicle"),
+                "scored_by": scored_by,
+                "score_notice": score_notice,
+            },
         }
     )
 
@@ -945,7 +960,34 @@ async def stage_change_event(body: StageChangeEvent):
 # the status update we forward it to the /events/whatsapp-status endpoint
 # which then broadcasts to connected SSE clients (Phase 2 pattern).
 def _broadcast_whatsapp_status(data: dict) -> None:
-    msg = f"event: whatsapp_status\ndata: {json.dumps(data)}\n\n"
+    msg = f"data: {json.dumps({'type': 'whatsapp_status', **data})}\n\n"
+    dead: set[asyncio.Queue] = set()
+    for q in _sse_clients:
+        try:
+            q.put_nowait(msg)
+        except asyncio.QueueFull:
+            dead.add(q)
+    _sse_clients.difference_update(dead)
+
+
+# whatsapp_inbound / rescore_complete are consumed by the frontend's plain
+# `es.onmessage` handlers (leads.$leadId.tsx), which only fire for the default
+# SSE "message" event — so unlike the helpers above these are sent WITHOUT a
+# custom `event:` line; the payload's own "type" field is what the client
+# switches on.
+def _broadcast_whatsapp_inbound(data: dict) -> None:
+    msg = f"data: {json.dumps(data)}\n\n"
+    dead: set[asyncio.Queue] = set()
+    for q in _sse_clients:
+        try:
+            q.put_nowait(msg)
+        except asyncio.QueueFull:
+            dead.add(q)
+    _sse_clients.difference_update(dead)
+
+
+def _broadcast_rescore_complete(data: dict) -> None:
+    msg = f"data: {json.dumps(data)}\n\n"
     dead: set[asyncio.Queue] = set()
     for q in _sse_clients:
         try:
@@ -1135,16 +1177,12 @@ async def _handle_inbound_message(event: dict, now: str) -> None:
     ))
 
     # Notify the browser in real time — rep sees a pop-up and the Outreach Log reloads.
-    try:
-        async with httpx.AsyncClient(base_url=SUPABASE_URL, timeout=5) as c:
-            await c.post("/events/whatsapp-inbound", json={
-                "type": "whatsapp_inbound",
-                "lead_id": lead["id"],
-                "customer_name": lead.get("customer_name", "Customer"),
-                "body_preview": body_text[:120],
-            }, headers=_sb_headers())
-    except Exception:
-        logger.warning("Failed to broadcast whatsapp-inbound event to shim")
+    _broadcast_whatsapp_inbound({
+        "type": "whatsapp_inbound",
+        "lead_id": lead["id"],
+        "customer_name": lead.get("customer_name", "Customer"),
+        "body_preview": body_text[:120],
+    })
 
 
 # ---------------------------------------------------------------------------

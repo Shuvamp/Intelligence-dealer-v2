@@ -40,12 +40,13 @@ def test_meta_provider_selected_when_token_set(monkeypatch):
     assert isinstance(provider, MetaWhatsAppProvider)
 
 
-def test_provider_for_tenant_uses_stored_connection(monkeypatch):
+@pytest.mark.asyncio
+async def test_provider_for_tenant_uses_stored_connection(monkeypatch):
     """A UI-connected tenant sends via its own stored creds, not env."""
     monkeypatch.delenv("WHATSAPP_ACCESS_TOKEN", raising=False)  # no env → would be Mock
     row = {"status": "connected", "access_token": "tok-abc", "page_id": "PHONE99"}
     with patch("app.services.channel_store.get", return_value=row):
-        provider = whatsapp_nodes._provider_for_tenant("t-1")
+        provider = await whatsapp_nodes._provider_for_tenant("t-1")
     assert isinstance(provider, MetaWhatsAppProvider)
     assert provider._phone_id == "PHONE99"
     assert provider._token == "tok-abc"

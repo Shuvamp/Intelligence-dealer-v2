@@ -63,7 +63,7 @@ async def whatsapp_connect(req: ConnectRequest):
     display_phone = data.get("display_phone_number")
     verified_name = req.display_name or data.get("verified_name")
 
-    channel_store.upsert(
+    await channel_store.upsert(
         req.tenant_id, "whatsapp",
         handle=display_phone,
         page_id=req.phone_number_id,
@@ -87,9 +87,9 @@ async def whatsapp_connect(req: ConnectRequest):
 @router.post("/disconnect")
 async def whatsapp_disconnect(req: DisconnectRequest):
     """Deactivate the connection — clears the token and marks it disconnected."""
-    row = channel_store.get(req.tenant_id, "whatsapp")
+    row = await channel_store.get(req.tenant_id, "whatsapp")
     if not row:
         raise HTTPException(status_code=404, detail="No WhatsApp connection found")
-    channel_store.update(req.tenant_id, "whatsapp", status="disconnected", access_token="")
+    await channel_store.update(req.tenant_id, "whatsapp", status="disconnected", access_token="")
     logger.info("[whatsapp:disconnect] tenant=%s", req.tenant_id)
     return {"status": "success", "message": "WhatsApp disconnected"}

@@ -25,17 +25,11 @@ import logging
 import uuid
 from datetime import datetime, timezone
 
-import httpx
-
 from agents.scoring.service import score_normalized_lead
 from agents.events import bus, DomainEvent, EventType  # Phase 7 — publish LEAD_RESCORED
 from .data import RescoringData
 
 logger = logging.getLogger(__name__)
-
-import os
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_KEY")
 
 _data = RescoringData()
 
@@ -319,23 +313,20 @@ async def rescore_lead(
         errors.append("event_publish_failed")
 
     # ── 6. Broadcast SSE so the browser score badge updates live ─────────────
+    # In-process, not an HTTP call: this previously POSTed to SUPABASE_URL, which
+    # has no such REST route and always failed silently. main.py already owns
+    # the SSE client set — deferred import (not at module load time) avoids a
+    # circular import, since main.py imports rescore_lead from this module.
     try:
-        def _sb_headers() -> dict:
-            return {
-                "apikey": SUPABASE_KEY,
-                "Authorization": f"Bearer {SUPABASE_KEY}",
-                "Content-Type": "application/json",
-            }
-
-        async with httpx.AsyncClient(base_url=SUPABASE_URL, timeout=5) as c:
-            await c.post("/events/rescore-complete", json={
-                "type":           "rescore_complete",
-                "lead_id":        lead_id,
-                "new_score":      new_score,
-                "previous_score": previous_score,
-                "score_changed":  score_changed,
-                "trigger":        trigger,
-            }, headers=_sb_headers())
+        from main import _broadcast_rescore_complete
+        _broadcast_rescore_complete({
+            "type":           "rescore_complete",
+            "lead_id":        lead_id,
+            "new_score":      new_score,
+            "previous_score": previous_score,
+            "score_changed":  score_changed,
+            "trigger":        trigger,
+        })
     except Exception:
         logger.warning("rescore_lead: SSE broadcast failed for %s", lead_id)
 

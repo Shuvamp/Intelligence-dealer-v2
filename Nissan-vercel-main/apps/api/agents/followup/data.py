@@ -92,9 +92,16 @@ class FollowupData:
             rows = r.json()
         return (rows[0] if isinstance(rows, list) and rows else {}).get("id")
 
-    async def create_notification(self, tenant_id: str, title: str, message: str) -> bool:
-        # Note: the local notifications table has no user_id column.
-        payload = {"tenant_id": tenant_id, "title": title, "message": message, "status": "unread"}
+    async def create_notification(self, tenant_id: str, user_id: str, title: str, message: str) -> bool:
+        # notifications.user_id is NOT NULL (supabase/migrations/0004_notifications_audit.sql)
+        # — the recipient must always be supplied by the caller.
+        payload = {
+            "tenant_id": tenant_id,
+            "user_id": user_id,
+            "title": title,
+            "message": message,
+            "status": "unread",
+        }
         async with httpx.AsyncClient(base_url=SUPABASE_URL, timeout=15) as c:
             r = await c.post("/rest/v1/notifications", json=payload, headers=_headers())
             r.raise_for_status()
