@@ -379,8 +379,12 @@ class BannerRequest(BaseModel):
     vehicle: Optional[str] = None
     offer: Optional[str] = None
     channel: Optional[str] = None
-    image_b64: Optional[str] = None # car photo (create) OR existing poster (refine), base64
+    image_b64: Optional[str] = None # single car photo (create) OR existing poster (refine), base64
     image_mime: str = "image/jpeg"
+    # Multi-car campaigns: every selected car photo, base64, in render order.
+    # Takes precedence over image_b64 when non-empty.
+    images_b64: list[str] = []
+    images_mime: list[str] = []
     logo_b64: Optional[str] = None  # user-selected logo, base64 — MUST be used as-is
     logo_mime: str = "image/png"
     logo2_b64: Optional[str] = None  # optional second logo (e.g. Nissan brand) — top-right
@@ -465,16 +469,28 @@ def poster_banner(req: BannerRequest):
             storage.remove(SUPABASE_POSTERS_BUCKET, existing)
             logger.info("[poster] force_regenerate — deleted cached %s", existing)
 
+    # Car photos, in render order. images_b64 carries every car the user selected;
+    # image_b64 stays the single-image path (and the existing poster on refine).
+    if req.images_b64:
+        images = [
+            (b64, req.images_mime[i] if i < len(req.images_mime) else "image/jpeg")
+            for i, b64 in enumerate(req.images_b64)
+        ]
+    elif req.image_b64:
+        images = [(req.image_b64, req.image_mime)]
+    else:
+        images = []
+
     # Master prompt assembled in app/poster_prompt.py (single source of truth).
     prompt = build_poster_prompt(
         kind=req.kind, title=req.title, theme=req.theme, headline=req.headline,
         vehicle=req.vehicle, offer=req.offer, channel=req.channel,
-        has_car_image=bool(req.image_b64), has_logo=bool(req.logo_b64),
+        car_image_count=len(images), has_logo=bool(req.logo_b64),
         has_logo2=bool(req.logo2_b64),
         instructions=req.instructions, mode=req.mode,
     )
     result = gemini_image(
-        prompt, req.image_b64, req.image_mime,
+        prompt, images,
         req.logo_b64, req.logo_mime, req.logo2_b64, req.logo2_mime,
     )
     if not result:

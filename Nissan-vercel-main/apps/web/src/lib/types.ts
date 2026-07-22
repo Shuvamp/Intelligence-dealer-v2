@@ -576,6 +576,7 @@ export interface MediaAsset {
   created_at: string
   campaign_selected?: boolean | null      // picked for the campaign planner
   campaign_selected_at?: string | null     // pick order (top-left logo first)
+  deleted_at?: string | null               // set = in Trash, null = live
 }
 
 export interface SelectedAsset {

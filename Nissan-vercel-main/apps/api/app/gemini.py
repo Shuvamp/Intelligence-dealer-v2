@@ -18,8 +18,7 @@ def has_gemini_key() -> bool:
 
 def gemini_image(
     prompt: str,
-    image_b64: str | None = None,
-    image_mime: str = "image/jpeg",
+    images: list[tuple[str, str]] | None = None,
     logo_b64: str | None = None,
     logo_mime: str = "image/png",
     logo2_b64: str | None = None,
@@ -27,8 +26,9 @@ def gemini_image(
 ) -> tuple[str, str] | None:
     """Generate (or edit) an image via Gemini 3 image models.
 
-    With image_b64, the car photo is passed as an inline part. With logo_b64,
-    the user-selected logo is prepended as the FIRST image part so the model
+    `images` is a list of (b64, mime) car photos (or the single existing poster
+    when refining) passed as inline parts, in order. With logo_b64, the
+    user-selected logo is prepended as the FIRST image part so the model
     renders it exactly; logo2_b64 (if given) follows as the SECOND image part
     (e.g. dealer logo + Nissan brand logo). Returns (b64, mime) of the first
     image part. Tries GEMINI_IMAGE_MODEL, then gemini-3.1-flash-image. None if all fail.
@@ -43,8 +43,8 @@ def gemini_image(
         parts.append({"inlineData": {"mimeType": logo_mime, "data": logo_b64}})
     if logo2_b64:
         parts.append({"inlineData": {"mimeType": logo2_mime, "data": logo2_b64}})
-    if image_b64:
-        parts.append({"inlineData": {"mimeType": image_mime, "data": image_b64}})
+    for img_b64, img_mime in images or []:
+        parts.append({"inlineData": {"mimeType": img_mime, "data": img_b64}})
     parts.append({"text": prompt})
     body = {
         "contents": [{"parts": parts}],
@@ -57,7 +57,7 @@ def gemini_image(
             f":generateContent?key={GEMINI_API_KEY}"
         )
         try:
-            logger.info("[gemini-image] generating with %s (input image: %s)", mdl, bool(image_b64))
+            logger.info("[gemini-image] generating with %s (input images: %d)", mdl, len(images or []))
             resp = httpx.post(url, json=body, timeout=180.0)
             if resp.status_code != 200:
                 logger.warning("[gemini-image] %s HTTP %s: %s", mdl, resp.status_code, resp.text[:200])

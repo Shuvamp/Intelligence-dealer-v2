@@ -56,7 +56,7 @@ _NO_ANNOTATIONS_RULE = (
     "content goes, not text to draw."
 )
 
-def _layout_zones(has_logo: bool, has_logo2: bool = False) -> str:
+def _layout_zones(has_logo: bool, has_logo2: bool = False, car_count: int = 0) -> str:
     """Return the layout instruction, top-to-bottom, as plain prose (no ZONE-style labels)."""
     if has_logo and has_logo2:
         top_strip = (
@@ -80,8 +80,10 @@ def _layout_zones(has_logo: bool, has_logo2: bool = False) -> str:
         "LAYOUT — stack five sections top to bottom, none may be omitted:\n"
         f"  {top_strip}\n"
         "  Upper section: Headline text (large, bold) + 1-line supporting subtext below it.\n"
-        "  Middle section: Hero vehicle — large, fully visible, sharp, dynamically lit. "
-        "The car must not be cropped; show the full body including wheels.\n"
+        f"  Middle section: {f'ALL {car_count} hero vehicles together' if car_count > 1 else 'Hero vehicle'}"
+        " — large, fully visible, sharp, dynamically lit. "
+        "No vehicle may be cropped; "
+        "show each full body including wheels.\n"
         "  Lower section: Offer details (price/discount/EMI) + prominent CTA (e.g. 'Book Now', 'Test Drive').\n"
         "  Bottom strip: a slim branded footer bar spanning the full width with a location pin icon and a "
         f"phone icon, showing this dealer contact info in small but legible text — {DEALER_FOOTER} "
@@ -133,7 +135,7 @@ def build_poster_prompt(
     vehicle: str | None = None,
     offer: str | None = None,
     channel: str | None = None,
-    has_car_image: bool = False,
+    car_image_count: int = 0,
     has_logo: bool = False,
     has_logo2: bool = False,
     instructions: str | None = None,
@@ -159,13 +161,27 @@ def build_poster_prompt(
     occasion = theme or title or "Nissan campaign"
     big_text = headline or theme or title or "Drive the Difference"
     scene = festive_scene(occasion)
-    car_clause = (
-        "Use the EXACT car from the attached photo as the hero subject — preserve its real "
-        "body shape, colour, grille, badges and wheels precisely; do NOT redesign or recolour it. "
-        "Place it prominently in the lower half, dynamically lit."
-        if has_car_image else
-        f"Feature a premium, accurate Nissan {vehicle or 'SUV'} as the hero subject in the lower half."
-    )
+    # Logos occupy the first one/two input images, so the car photos start after them.
+    _first_car = 1 + int(has_logo) + int(has_logo2)
+    if car_image_count > 1:
+        car_clause = (
+            f"{car_image_count} car photos are attached (input images {_first_car} to "
+            f"{_first_car + car_image_count - 1}). EVERY ONE of them must appear in the poster as a "
+            "hero subject — do not drop, merge, duplicate or substitute any of them. Preserve each "
+            "car's real body shape, colour, grille, badges and wheels precisely; do NOT redesign or "
+            "recolour them. Arrange all of them together in the middle section as one cohesive "
+            "line-up (staggered depth or side by side), each fully visible and uncropped, sharing "
+            "the same lighting, perspective and ground plane so the group looks like a single "
+            "photograph."
+        )
+    elif car_image_count == 1:
+        car_clause = (
+            "Use the EXACT car from the attached photo as the hero subject — preserve its real "
+            "body shape, colour, grille, badges and wheels precisely; do NOT redesign or recolour it. "
+            "Place it prominently in the lower half, dynamically lit."
+        )
+    else:
+        car_clause = f"Feature a premium, accurate Nissan {vehicle or 'SUV'} as the hero subject in the lower half."
     channel_hint = _CHANNEL_HINT.get((channel or "").lower())
 
     lines = [
@@ -177,7 +193,7 @@ def build_poster_prompt(
 
     _NO_ANNOTATIONS_RULE,
 
-    _layout_zones(has_logo, has_logo2),
+    _layout_zones(has_logo, has_logo2, car_image_count),
 
     "The final image should resemble a professionally designed Nissan India advertising campaign similar to premium festival, lifestyle, family, seasonal, awareness or promotional campaigns.",
 

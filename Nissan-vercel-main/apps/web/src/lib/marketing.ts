@@ -1141,13 +1141,15 @@ import type { ChannelConnection, LinkedInProfileResult } from './types'
 async function queryAssets(
   supabase: ReturnType<typeof getSupabaseServerClient>,
   tenantId: string,
-  filters: { asset_type?: string; vehicle?: string; search?: string },
+  filters: { asset_type?: string; vehicle?: string; search?: string; trashed?: boolean },
 ): Promise<Array<MediaAsset>> {
   let query = supabase
     .from('marketing_assets')
     .select('*')
     .eq('tenant_id', tenantId)
     .order('created_at', { ascending: false })
+  // Trashed rows stay in the table until purged, so every listing has to pick a side.
+  query = filters.trashed ? query.not('deleted_at', 'is', null) : query.is('deleted_at', null)
   if (filters.asset_type) query = query.eq('asset_type', filters.asset_type)
   if (filters.vehicle) query = query.eq('vehicle', filters.vehicle)
   if (filters.search) query = query.ilike('name', `%${filters.search}%`)
@@ -1157,11 +1159,31 @@ async function queryAssets(
 }
 
 export const getMediaAssets = createServerFn({ method: 'GET' })
-  .validator((d: { asset_type?: string; vehicle?: string; search?: string } | undefined) => d ?? {})
+  .validator((d: { asset_type?: string; vehicle?: string; search?: string; trashed?: boolean } | undefined) => d ?? {})
   .handler(async ({ data }): Promise<Array<MediaAsset>> => {
     const supabase = getSupabaseServerClient()
     const { tenantId } = await authCtx(supabase)
     return queryAssets(supabase, tenantId, data)
+  })
+
+// Trash / restore. Trashed assets are also dropped from the campaign selection so
+// a deleted car can't keep showing up in generated posters.
+export const setAssetTrashed = createServerFn({ method: 'POST' })
+  .validator((d: { assetIds: Array<string>; trashed: boolean }) => d)
+  .handler(async ({ data }): Promise<{ ok: true }> => {
+    const supabase = getSupabaseServerClient()
+    const { tenantId } = await authCtx(supabase)
+    const { error } = await supabase
+      .from('marketing_assets')
+      .update(
+        data.trashed
+          ? { deleted_at: new Date().toISOString(), campaign_selected: false, campaign_selected_at: null }
+          : { deleted_at: null },
+      )
+      .in('id', data.assetIds)
+      .eq('tenant_id', tenantId)
+    if (error) throw new Error(`Failed to update trash: ${error.message}`)
+    return { ok: true }
   })
 
 export const uploadAsset = createServerFn({ method: 'POST' })
@@ -2134,6 +2156,7 @@ export const generatePosterImage = createServerFn({ method: 'POST' })
     campaign_id?: string; day_date?: string; day_num?: number; event_id?: string
     title?: string; theme: string; headline: string
     vehicle?: string; asset_url?: string | null
+    asset_urls?: string[]             // every selected car photo — all are rendered
     logo_url?: string | null         // user-selected logo — passed as-is to Gemini
     logo_url_2?: string | null       // optional second logo (Nissan brand) — top-right
     instructions?: string            // extra user art-direction / refine comment
@@ -2148,6 +2171,8 @@ export const generatePosterImage = createServerFn({ method: 'POST' })
     const mode = data.mode ?? 'create'
     let imageB64: string | null = null
     let imageMime = 'image/jpeg'
+    // Every car photo for this poster, in render order (multi-vehicle campaigns).
+    const carImages: Array<{ b64: string; mime: string }> = []
     let logoB64: string | null = null
     let logoMime = 'image/png'
     let logo2B64: string | null = null
@@ -2169,25 +2194,31 @@ export const generatePosterImage = createServerFn({ method: 'POST' })
       // Create: resolve the car photo — campaign asset for days; most recent
       // vehicle upload for events (and as day fallback). Assets live in
       // Supabase Storage, fetched over HTTP.
-      let assetUrl = data.asset_url ?? null
-      if (!assetUrl) {
+      let assetUrls = (data.asset_urls?.length ? data.asset_urls : [data.asset_url]).filter(
+        (u): u is string => !!u,
+      )
+      if (assetUrls.length === 0) {
         try {
           const { listAssets } = await import('./analytics.duckdb')
           const assets = await listAssets(tenantId, { asset_type: 'vehicle' })
-          assetUrl = assets[0]?.file_url ?? null
+          assetUrls = assets[0]?.file_url ? [assets[0].file_url] : []
         } catch { /* generate without a car photo */ }
       }
-      if (assetUrl) {
+      for (const url of assetUrls) {
         try {
-          const assetRes = await fetch(assetUrl)
+          const assetRes = await fetch(url)
           if (assetRes.ok) {
-            imageB64 = Buffer.from(await assetRes.arrayBuffer()).toString('base64')
-            imageMime = assetUrl.toLowerCase().endsWith('.png') ? 'image/png' : 'image/jpeg'
+            carImages.push({
+              b64: Buffer.from(await assetRes.arrayBuffer()).toString('base64'),
+              mime: url.toLowerCase().endsWith('.png') ? 'image/png' : 'image/jpeg',
+            })
           }
         } catch (e) {
-          console.warn('[generatePosterImage] asset fetch failed, text-only generation:', e)
+          console.warn('[generatePosterImage] asset fetch failed, skipping car photo:', e)
         }
       }
+      imageB64 = carImages[0]?.b64 ?? null
+      imageMime = carImages[0]?.mime ?? 'image/jpeg'
 
       // Load user-selected logo — highest priority branding, must arrive before car photo.
       const logoUrl = data.logo_url ?? null
@@ -2232,6 +2263,8 @@ export const generatePosterImage = createServerFn({ method: 'POST' })
         vehicle: data.vehicle ?? null,
         image_b64: imageB64,
         image_mime: imageMime,
+        images_b64: carImages.map((i) => i.b64),
+        images_mime: carImages.map((i) => i.mime),
         logo_b64: logoB64,
         logo_mime: logoMime,
         logo2_b64: logo2B64,

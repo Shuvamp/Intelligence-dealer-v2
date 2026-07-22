@@ -451,7 +451,11 @@ async def list_assets(
     vehicle: str | None = None,
     search: str | None = None,
 ) -> list[dict[str, Any]]:
-    params: list[tuple[str, str]] = [("tenant_id", f"eq.{tenant_id}"), ("order", "created_at.desc")]
+    params: list[tuple[str, str]] = [
+        ("tenant_id", f"eq.{tenant_id}"),
+        ("deleted_at", "is.null"),  # trashed assets stay in the table until purged
+        ("order", "created_at.desc"),
+    ]
     if asset_type:
         params.append(("asset_type", f"eq.{asset_type}"))
     if vehicle:

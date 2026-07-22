@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useMemo } from 'react'
 import { createFileRoute } from '@tanstack/react-router'
-import { getMediaAssets, deleteAsset, setAssetCampaignSelected } from '#/lib/marketing'
+import { getMediaAssets, deleteAsset, setAssetCampaignSelected, setAssetTrashed } from '#/lib/marketing'
 import type { MediaAsset } from '#/lib/types'
 import { AssetUploadDialog } from '#/components/marketing/AssetUploadDialog'
 import { AssetDetailDrawer } from '#/components/marketing/AssetDetailDrawer'
@@ -13,7 +13,10 @@ import {
 import { cn } from '#/lib/utils'
 
 export const Route = createFileRoute('/_authed/marketing/media-library')({
-  loader: async () => ({ assets: await getMediaAssets({ data: {} }) }),
+  loader: async () => ({
+    assets: await getMediaAssets({ data: {} }),
+    trashed: await getMediaAssets({ data: { trashed: true } }),
+  }),
   component: MediaLibrary,
 })
 
@@ -55,10 +58,10 @@ function isImage(url: string) {
 }
 
 function MediaLibrary() {
-  const { assets: initialAssets } = Route.useLoaderData()
+  const { assets: initialAssets, trashed: initialTrashed } = Route.useLoaderData()
 
   const [assets, setAssets] = useState<MediaAsset[]>(initialAssets)
-  const [trashed, setTrashed] = useState<MediaAsset[]>([])
+  const [trashed, setTrashed] = useState<MediaAsset[]>(initialTrashed)
   const [favorites, setFavorites] = useState<Set<string>>(new Set())
 
   const [layout, setLayout] = useState<'grid' | 'list'>('grid')
@@ -209,6 +212,8 @@ function MediaLibrary() {
   }
 
   // ---- Soft delete → trash; permanent delete from trash ----
+  // Both write deleted_at through to Supabase — otherwise a "deleted" asset comes
+  // back on the next load. Optimistic UI, reverted by a reload if the write fails.
   function softDelete(ids: string[]) {
     const moving = assets.filter((a) => ids.includes(a.id))
     setTrashed((t) => [...moving, ...t])
@@ -216,12 +221,14 @@ function MediaLibrary() {
     setSelected((s) => s.filter((x) => !ids.includes(x)))
     dropFromCampaign(ids)
     if (detail && ids.includes(detail.id)) setDetail(null)
+    void setAssetTrashed({ data: { assetIds: ids, trashed: true } })
   }
   function restore(ids: string[]) {
     const back = trashed.filter((a) => ids.includes(a.id))
     setAssets((prev) => [...back, ...prev])
     setTrashed((t) => t.filter((a) => !ids.includes(a.id)))
     setSelected((s) => s.filter((x) => !ids.includes(x)))
+    void setAssetTrashed({ data: { assetIds: ids, trashed: false } })
   }
   async function purge(ids: string[]) {
     setDeleting(true)

@@ -283,6 +283,16 @@ function SuggestButton({ busy, onClick, title }: { busy: boolean; onClick: () =>
 // as the user navigates items within a session.
 const vehicleAssetCache = new Map<string, MediaAsset | null>()
 
+// Every car photo picked for a campaign, the day's own vehicle first. All of
+// them go to the poster generator — a 2-car campaign renders both cars.
+function campaignAssetUrls(camp: CampaignSummary | null | undefined, vehicle?: string): string[] {
+  const assets = (camp?.selected_assets ?? []).filter((a) => a.file_url)
+  return [
+    ...assets.filter((a) => a.vehicle === vehicle),
+    ...assets.filter((a) => a.vehicle !== vehicle),
+  ].map((a) => a.file_url!)
+}
+
 function ContentStudio() {
   const { campaigns, campaignDays, monthEvents, channels, tenantId } = Route.useLoaderData()
   const router = useRouter()
@@ -540,10 +550,7 @@ function ContentStudio() {
     generatingKeysRef.current.add(key)
     setGeneratingKeys(prev => new Set([...prev, key]))
     const camp = campaigns.find(c => c.id === selectedItem.campaign_id)
-    const assetUrl = selectedItem.kind === 'day'
-      ? (camp?.selected_assets?.find(a => a.vehicle === selectedItem.vehicle && a.file_url)?.file_url
-         ?? camp?.selected_assets?.find(a => a.file_url)?.file_url ?? null)
-      : null
+    const assetUrls = selectedItem.kind === 'day' ? campaignAssetUrls(camp, selectedItem.vehicle) : []
     const logoUrl = camp?.selected_logo?.file_url ?? null
     const logoUrl2 = camp?.selected_logo_2?.file_url ?? null
     generatePosterImage({
@@ -557,7 +564,7 @@ function ContentStudio() {
         theme: selectedItem.theme,
         headline: selectedItem.headline || selectedItem.theme,
         vehicle: selectedItem.vehicle ?? camp?.vehicles?.[0] ?? 'Nissan',
-        asset_url: assetUrl,
+        asset_urls: assetUrls,
         logo_url: logoUrl,
         logo_url_2: logoUrl2,
       },
@@ -670,11 +677,9 @@ function ContentStudio() {
     setGeneratingKeys(prev => new Set([...prev, key]))
     setError(null)
     try {
-      const campaignAssetUrl = selectedItem.kind === 'day'
-        ? (selectedCampaign?.selected_assets?.find((a) => a.vehicle === selectedItem.vehicle && a.file_url)?.file_url
-           ?? selectedCampaign?.selected_assets?.find((a) => a.file_url)?.file_url
-           ?? null)
-        : (eventVehicleAsset?.file_url ?? null)
+      const posterAssetUrls = selectedItem.kind === 'day'
+        ? campaignAssetUrls(selectedCampaign, selectedItem.vehicle)
+        : [eventVehicleAsset?.file_url].filter((u): u is string => !!u)
       const campaignLogoUrl = isEvents
         ? (eventLogoAsset?.file_url ?? null)
         : (selectedCampaign?.selected_logo?.file_url ?? null)
@@ -692,7 +697,7 @@ function ContentStudio() {
           theme: selectedItem.theme,
           headline: headline || selectedItem.theme,
           vehicle: selectedItem.vehicle ?? vehicle,
-          asset_url: campaignAssetUrl,
+          asset_urls: posterAssetUrls,
           logo_url: campaignLogoUrl,
           logo_url_2: campaignLogoUrl2,
           force_regenerate: true,
