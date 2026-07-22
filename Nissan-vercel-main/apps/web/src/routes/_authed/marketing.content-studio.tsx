@@ -39,6 +39,10 @@ function ContentStudioSkeleton() {
 }
 
 export const Route = createFileRoute('/_authed/marketing/content-studio')({
+  // ?campaign=<id> preselects a campaign — used after the planner wizard
+  // creates one, so the studio opens on the new campaign, not the first.
+  validateSearch: (s: Record<string, unknown>): { campaign?: string } =>
+    typeof s.campaign === 'string' ? { campaign: s.campaign } : {},
   loader: async () => {
     const now = new Date()
     const [campaigns, campaignDays, monthEvents, channels, tenantId] = await Promise.all([
@@ -304,7 +308,20 @@ function ContentStudio() {
   const [previewOpen, setPreviewOpen] = useState(false)   // hidden by default on load
 
   // ── selection ────────────────────────────────────────────────────────────
-  const [selectedId, setSelectedId] = useState<string>(campaigns[0]?.id ?? EVENTS_ID)
+  const { campaign: campaignParam } = Route.useSearch()
+  const [selectedId, setSelectedId] = useState<string>(campaignParam ?? campaigns[0]?.id ?? EVENTS_ID)
+  // The loader data can still be the cached list on first render after the
+  // planner wizard navigates here, so ?campaign= may name a campaign that is
+  // not in `campaigns` yet. Re-apply it once the fresh list lands.
+  useEffect(() => {
+    if (!campaignParam) return
+    setSelectedId(campaignParam)
+    // Drop the param once the campaign is really in the list, so a later
+    // router.invalidate() (poster generation, save) can't snap the dropdown back.
+    if (campaigns.some((c) => c.id === campaignParam)) {
+      void router.navigate({ to: '.', search: {}, replace: true })
+    }
+  }, [campaignParam, campaigns, router])
   const selectedCampaign: CampaignSummary | null =
     selectedId === EVENTS_ID ? null : (campaigns.find((c) => c.id === selectedId) ?? null)
   const isEvents = selectedId === EVENTS_ID

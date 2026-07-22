@@ -566,6 +566,7 @@ export function CampaignPlannerWizard({ open, onOpenChange, defaultValues }: Pro
   const [form, setForm] = useState<CampaignPlanInput>({ ...emptyInput(), ...defaultValues })
   const [generating, setGenerating] = useState(false)
   const [summary, setSummary] = useState<CampaignPlanResult | null>(null)
+  const [createdId, setCreatedId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [suggestingDesc, setSuggestingDesc] = useState(false)
   const [isListening, setIsListening] = useState(false)
@@ -803,7 +804,8 @@ export function CampaignPlannerWizard({ open, onOpenChange, defaultValues }: Pro
     setError(null)
     try {
       const plan = await generateCampaignPlan({ data: form })
-      await createCampaignFromPlan({ data: plan })
+      const { campaign_id } = await createCampaignFromPlan({ data: plan })
+      setCreatedId(campaign_id)
       await router.invalidate()
       setSummary(plan)
     } catch (e) {
@@ -1084,8 +1086,12 @@ export function CampaignPlannerWizard({ open, onOpenChange, defaultValues }: Pro
                   type="button"
                   onClick={() => {
                     handleClose()
-                    // Content is already generated — review it in Content Studio.
-                    void router.navigate({ to: '/marketing/content-studio' })
+                    // Content is already generated — review it in Content Studio,
+                    // preselected on the campaign we just created.
+                    void router.navigate({
+                      to: '/marketing/content-studio',
+                      search: createdId ? { campaign: createdId } : {},
+                    })
                   }}
                   className="rounded-[10px] bg-[#C3002F] px-5 py-2 text-[13px] font-semibold text-white hover:bg-[#a50027] transition"
                 >
