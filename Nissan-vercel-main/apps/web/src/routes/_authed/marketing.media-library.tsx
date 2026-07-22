@@ -590,6 +590,9 @@ function AssetCard({ asset, index, selected, favorite, copied, inTrash, onToggle
               src={asset.file_url}
               alt={asset.name}
               loading="lazy"
+              // On a full page load the image can finish before React hydrates, so
+              // onLoad never fires and the thumbnail stays invisible. Catch that here.
+              ref={(el) => { if (el?.complete) setLoaded(true) }}
               onLoad={() => setLoaded(true)}
               onError={() => setLoaded(true)}
               className={cn('w-full h-full object-cover transition-all duration-500 group-hover:scale-[1.06]', loaded ? 'opacity-100' : 'opacity-0')}

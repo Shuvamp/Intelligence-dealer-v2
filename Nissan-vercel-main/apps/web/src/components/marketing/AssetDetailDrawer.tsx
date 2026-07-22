@@ -120,6 +120,13 @@ export function AssetDetailDrawer({ asset, onClose, onDelete, isFavorite, onTogg
                   <img
                     src={asset.file_url}
                     alt={asset.name}
+                    // A cached image can be complete before onLoad can attach.
+                    ref={(el) => {
+                      if (el?.complete && el.naturalWidth) {
+                        setDims({ w: el.naturalWidth, h: el.naturalHeight })
+                        setImgLoaded(true)
+                      }
+                    }}
                     onLoad={(e) => {
                       const t = e.currentTarget
                       setDims({ w: t.naturalWidth, h: t.naturalHeight })
