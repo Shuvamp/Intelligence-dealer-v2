@@ -69,15 +69,18 @@ function Metric({
   label, value, icon, color, suffix, tracked = true,
 }: { label: string; value?: string; icon: React.ReactNode; color: string; suffix?: string; tracked?: boolean }) {
   return (
-    <div className={`rounded-[12px] border bg-white p-3 ${tracked ? 'border-[#E5E7EB]' : 'border-dashed border-[#E5E7EB]'}`}>
-      <div className="flex items-center gap-1.5 text-[#9CA3AF]">
-        <span style={{ color: tracked ? color : '#D1D5DB' }}>{icon}</span>
-        <span className="text-[10px] font-semibold uppercase tracking-wide">{label}</span>
-      </div>
+    <div className={`group rounded-[16px] border bg-white p-4 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_8px_24px_-8px_rgba(16,24,40,0.14)] ${tracked ? 'border-[#EDEFF2]' : 'border-dashed border-[#E5E7EB]'}`}>
+      <span
+        className="flex h-9 w-9 items-center justify-center rounded-[11px] transition-transform duration-200 group-hover:scale-105"
+        style={{ background: tracked ? `${color}14` : '#F3F4F6', color: tracked ? color : '#D1D5DB' }}
+      >
+        {icon}
+      </span>
+      <p className="mt-3 text-[10px] font-semibold uppercase tracking-wide text-[#9CA3AF]">{label}</p>
       {tracked ? (
-        <p className="mt-1 text-[20px] font-bold text-[#1A1A1A]">{value}{suffix && <span className="text-[12px] text-[#9CA3AF]"> {suffix}</span>}</p>
+        <p className="mt-0.5 text-[24px] font-bold leading-none text-[#1A1A1A]">{value}{suffix && <span className="text-[12px] font-medium text-[#9CA3AF]"> {suffix}</span>}</p>
       ) : (
-        <p className="mt-1.5 text-[11px] font-medium leading-tight text-[#B0B4BA]">Analytics unavailable</p>
+        <p className="mt-1 text-[11px] font-medium leading-tight text-[#B0B4BA]">Analytics unavailable</p>
       )}
     </div>
   )
@@ -193,7 +196,7 @@ function TopPostRow({ post: p, rank }: { post: LinkedInPostInsight; rank: number
 }
 
 // ── Instagram insights panel (real likes/comments; no reach/impressions/etc — Instagram has no equivalent here) ───
-export function InstagramInsightsPanel({ data }: { data: InstagramInsights }) {
+export function InstagramInsightsPanel({ data, showTopPosts = true }: { data: InstagramInsights; showTopPosts?: boolean }) {
   if (!data.connected) {
     return (
       <div className="rounded-[18px] border border-[#E5E7EB] bg-white p-6 text-center">
@@ -210,15 +213,17 @@ export function InstagramInsightsPanel({ data }: { data: InstagramInsights }) {
 
   return (
     <div className="space-y-4">
-      <div className="rounded-[18px] border border-[#E5E7EB] bg-white p-5">
-        <div className="mb-1 flex items-center gap-2">
-          <Instagram className="h-4 w-4 text-[#E1306C]" />
-          <h2 className="text-[14px] font-semibold text-[#1A1A1A]">Instagram Insights</h2>
-          <span className="ml-auto flex items-center gap-1 text-[10px] text-[#9CA3AF]">
+      <div className="rounded-[20px] border border-[#EDEFF2] bg-white p-5 shadow-[0_1px_2px_rgba(16,24,40,0.04),0_8px_24px_-8px_rgba(16,24,40,0.08)]">
+        <div className="mb-4 flex items-center gap-2.5">
+          <span className="flex h-9 w-9 items-center justify-center rounded-[11px] bg-gradient-to-br from-[#F58529] via-[#DD2A7B] to-[#8134AF] text-white shadow-[0_4px_12px_-2px_rgba(221,42,123,0.45)]">
+            <Instagram className="h-[18px] w-[18px]" />
+          </span>
+          <h2 className="text-[15px] font-semibold text-[#1A1A1A]">Instagram Insights</h2>
+          <span className="ml-auto flex items-center gap-1 rounded-full bg-[#F9FAFB] px-2.5 py-1 text-[10px] font-medium text-[#6B7280]">
             <Info className="h-3 w-3" /> {data.postsWithStats}/{data.postsTracked} posts with stats
           </span>
         </div>
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+        <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
           <Metric label="Likes" value={likesOk ? fmt(data.likes) : undefined} icon={<ThumbsUp className="h-4 w-4" />} color="#E1306C" tracked={likesOk} />
           <Metric label="Comments" value={fmt(data.comments)} icon={<MessageCircle className="h-4 w-4" />} color="#8B5CF6" />
           <Metric label="Engagement" value={fmt(data.engagement)} icon={<Activity className="h-4 w-4" />} color="#22C55E" />
@@ -231,21 +236,23 @@ export function InstagramInsightsPanel({ data }: { data: InstagramInsights }) {
         )}
       </div>
 
-      <div className="rounded-[18px] border border-[#E5E7EB] bg-white p-5">
-        <div className="mb-3 flex items-center gap-2">
-          <Trophy className="h-4 w-4 text-[#E1306C]" />
-          <h2 className="text-[14px] font-semibold text-[#1A1A1A]">Top Performing Posts</h2>
-        </div>
-        {data.topPosts.length === 0 ? (
-          <p className="py-6 text-center text-[12px] text-[#9CA3AF]">
-            No post stats yet. Newly published Instagram posts appear here once they collect likes/comments.
-          </p>
-        ) : (
-          <div className="space-y-2">
-            {data.topPosts.map((p, i) => <InstagramTopPostRow key={p.mediaId} post={p} rank={i + 1} />)}
+      {showTopPosts && (
+        <div className="rounded-[18px] border border-[#E5E7EB] bg-white p-5">
+          <div className="mb-3 flex items-center gap-2">
+            <Trophy className="h-4 w-4 text-[#E1306C]" />
+            <h2 className="text-[14px] font-semibold text-[#1A1A1A]">Top Performing Posts</h2>
           </div>
-        )}
-      </div>
+          {data.topPosts.length === 0 ? (
+            <p className="py-6 text-center text-[12px] text-[#9CA3AF]">
+              No post stats yet. Newly published Instagram posts appear here once they collect likes/comments.
+            </p>
+          ) : (
+            <div className="space-y-2">
+              {data.topPosts.map((p, i) => <InstagramTopPostRow key={p.mediaId} post={p} rank={i + 1} />)}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }

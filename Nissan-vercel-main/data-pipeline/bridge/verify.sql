@@ -117,3 +117,15 @@ SELECT count(DISTINCT stage) AS distinct_stages FROM public.leads;
 -- At least one pipeline-tagged signal exists.
 SELECT count(*) AS pipeline_signals
   FROM public.market_signals WHERE source_module = 'pipeline';
+
+-- Campaign insights landed, every row FKs a real campaign of the same tenant,
+-- and the series spans more than one day (the dashboard trend needs a range).
+SELECT count(*)                        AS campaign_insight_rows,
+       count(DISTINCT campaign_id)     AS campaigns_covered,
+       count(DISTINCT captured_at::date) AS days_covered
+  FROM public.campaign_insights;
+
+SELECT count(*) AS campaign_insights_tenant_mismatch
+  FROM public.campaign_insights i
+  JOIN public.campaigns c ON c.id = i.campaign_id
+ WHERE c.tenant_id <> i.tenant_id;

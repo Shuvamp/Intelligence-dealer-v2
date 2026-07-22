@@ -19,3 +19,15 @@ CREATE TABLE IF NOT EXISTS silver.spine_customer_map (
 
 CREATE INDEX IF NOT EXISTS spine_customer_map_spine_idx
     ON silver.spine_customer_map (spine_id);
+
+-- Same idea for campaigns: the pipeline's free-text campaign code (from
+-- bronze.channel_insights_raw / silver.dim_campaign) -> public.campaigns.id.
+-- The platform owns the campaign dimension; the loader NEVER creates a campaign,
+-- it only attaches pipeline facts to campaigns the dealer already has.
+CREATE TABLE IF NOT EXISTS silver.spine_campaign_map (
+    tenant_id     uuid NOT NULL,
+    campaign_code text NOT NULL,                       -- silver.dim_campaign.campaign_id
+    spine_id      uuid NOT NULL,                       -- public.campaigns.id
+    created_at    timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (tenant_id, campaign_code)
+);

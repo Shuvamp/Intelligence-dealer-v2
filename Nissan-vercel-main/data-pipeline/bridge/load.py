@@ -410,6 +410,96 @@ def load_market_signals(cur, tenant_id: str, locations: List[str]) -> int:
 
 
 # ---------------------------------------------------------------------------
+# Pass 5 — campaign_insights (gold.mart_campaign_performance_daily -> spine).
+# ---------------------------------------------------------------------------
+
+def map_campaigns(cur, tenant_id: str) -> Dict[str, str]:
+    """Resolve pipeline campaign codes -> public.campaigns.id for this tenant.
+
+    The platform owns the campaign dimension, so this NEVER inserts a campaign:
+    codes are attached round-robin to the dealer's existing campaigns and the
+    assignment is frozen in silver.spine_campaign_map, so reruns stay stable
+    even as the dealer adds campaigns later. Returns {} if the dealer has none.
+    """
+    cur.execute("""
+        SELECT id::text FROM public.campaigns
+         WHERE tenant_id = %s ORDER BY created_at, id
+    """, (tenant_id,))
+    spine_campaigns = [r[0] for r in cur.fetchall()]
+    if not spine_campaigns:
+        return {}
+
+    cur.execute("""
+        SELECT DISTINCT campaign_id
+          FROM gold.mart_campaign_performance_daily
+         WHERE tenant_id = %s AND campaign_id IS NOT NULL
+         ORDER BY campaign_id
+    """, (tenant_id,))
+    codes = [r[0] for r in cur.fetchall()]
+
+    mapping: Dict[str, str] = {}
+    for i, code in enumerate(codes):
+        cur.execute("""
+            SELECT spine_id::text FROM silver.spine_campaign_map
+             WHERE tenant_id = %s AND campaign_code = %s
+        """, (tenant_id, code))
+        row = cur.fetchone()
+        spine_id = row[0] if row else spine_campaigns[i % len(spine_campaigns)]
+        cur.execute("""
+            INSERT INTO silver.spine_campaign_map (tenant_id, campaign_code, spine_id)
+            VALUES (%s, %s, %s)
+            ON CONFLICT (tenant_id, campaign_code) DO NOTHING
+        """, (tenant_id, code, spine_id))
+        mapping[code] = spine_id
+    return mapping
+
+
+def load_campaign_insights(cur, tenant_id: str) -> int:
+    """Day-grain campaign facts -> public.campaign_insights.
+
+    captured_at carries the metric_date (midnight UTC) because the spine and the
+    Marketing dashboard both treat it as the observation date. Reruns delete this
+    tenant's rows for the mapped campaigns first, so the pass is idempotent.
+    conversions / conversion_rate stay NULL — the pipeline does not observe them.
+    """
+    mapping = map_campaigns(cur, tenant_id)
+    if not mapping:
+        return 0
+
+    cur.execute("""
+        SELECT campaign_id, metric_date, impressions, reach, engagement, leads, spend, cost_per_lead
+          FROM gold.mart_campaign_performance_daily
+         WHERE tenant_id = %s AND campaign_id IS NOT NULL
+         ORDER BY metric_date, campaign_id
+    """, (tenant_id,))
+    rows = cur.fetchall()
+
+    inserts: List[tuple] = []
+    for code, metric_date, impressions, reach, engagement, leads, spend, cpl in rows:
+        spine_id = mapping.get(code)
+        if spine_id is None or metric_date is None:
+            continue
+        inserts.append((tenant_id, spine_id, int(reach or 0), int(impressions or 0),
+                        int(engagement or 0), int(leads or 0), spend, cpl, metric_date))
+
+    if not inserts:
+        return 0
+
+    cur.execute("""
+        DELETE FROM public.campaign_insights
+         WHERE tenant_id = %s AND campaign_id = ANY(%s::uuid[])
+    """, (tenant_id, sorted(set(mapping.values()))))
+
+    cur.executemany("""
+        INSERT INTO public.campaign_insights
+          (tenant_id, campaign_id, reach, impressions, engagement,
+           leads_generated, spend, cost_per_lead, captured_at)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+    """, inserts)
+    return len(inserts)
+
+
+# ---------------------------------------------------------------------------
 # Driver
 # ---------------------------------------------------------------------------
 
@@ -447,10 +537,31 @@ def main() -> int:
                 summary.append((tid, len(spine_ids), len(lead_by_cid), n_events, n_signals))
                 conn.commit()
 
+            # Campaign facts come from the marketing simulator, which has its own
+            # tenants — a dealer can have channel metrics without any silver
+            # customers, so this pass is driven off its own tenant list.
+            cur.execute("""
+                SELECT DISTINCT tenant_id::text
+                  FROM gold.mart_campaign_performance_daily ORDER BY 1
+            """)
+            insight_counts: List[Tuple[str, int]] = []
+            for tid in [r[0] for r in cur.fetchall()]:
+                if tid not in tenants:
+                    print(f"[bridge] WARN tenant {tid} not in public.tenants — campaign insights skipped.")
+                    continue
+                n = load_campaign_insights(cur, tid)
+                if n == 0:
+                    print(f"[bridge] WARN tenant {tid[:8]} has no public.campaigns — campaign insights skipped.")
+                insight_counts.append((tid, n))
+                conn.commit()
+
         print("\n[bridge] load complete:")
         print(f"  {'tenant':<10} {'customers':>10} {'leads':>8} {'events':>8} {'signals':>8}")
         for tid, nc, nl, ne, ns in summary:
             print(f"  {tid[:8]:<10} {nc:>10} {nl:>8} {ne:>8} {ns:>8}")
+        print(f"  {'tenant':<10} {'campaign_insights':>18}")
+        for tid, n in insight_counts:
+            print(f"  {tid[:8]:<10} {n:>18}")
         return 0
     finally:
         conn.close()

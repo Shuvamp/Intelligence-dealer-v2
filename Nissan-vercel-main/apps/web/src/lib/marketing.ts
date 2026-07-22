@@ -370,6 +370,8 @@ export const getMarketingAnalytics = createServerFn({ method: 'GET' })
       conversionRate: r.impressions ? round1((r.engagement / r.impressions) * 100) : 0,
     })).sort((a, b) => b.reach - a.reach)
 
+    const channelKey = data.channel && data.channel !== 'all' ? data.channel : null
+
     // ── Channel publish volume (REAL — post counts per channel) ─────────────
     const byChannel = new Map<string, AnalyticsChannelVolume>()
     for (const p of posts) {
@@ -381,8 +383,6 @@ export const getMarketingAnalytics = createServerFn({ method: 'GET' })
       if (publishedIn) v.published += 1
       byChannel.set(p.channel, v)
     }
-    const channelVolume = [...byChannel.values()].sort((a, b) => b.total - a.total)
-
     // ── Recent activity feed (real posts in range) ──────────────────────────
     const statusKind = (s: string): AnalyticsActivityItem['kind'] =>
       s === 'published' ? 'published'
@@ -390,10 +390,8 @@ export const getMarketingAnalytics = createServerFn({ method: 'GET' })
       : s === 'approved' ? 'approved'
       : s === 'generated' || s === 'pending_approval' ? 'generated'
       : s === 'draft' ? 'draft' : 'other'
-    const activity: Array<AnalyticsActivityItem> = posts
+    let activity: Array<AnalyticsActivityItem> = posts
       .filter((p) => inRange(p.published_at) || inRange(p.created_at))
-      .sort((a, b) => String(b.published_at ?? b.created_at).localeCompare(String(a.published_at ?? a.created_at)))
-      .slice(0, 12)
       .map((p) => ({
         id: p.id,
         kind: statusKind(p.status),
@@ -404,6 +402,51 @@ export const getMarketingAnalytics = createServerFn({ method: 'GET' })
         at: p.published_at ?? p.created_at,
       }))
 
+    // ── Merge real Instagram account activity (organic + app-published) ────
+    // campaign_posts only captures content created through this app's
+    // Content Studio, but most dealers post to Instagram directly.
+    // instagram_posts (synced by instagram_analytics_poller) tracks the whole
+    // IG account, so Channel Performance / Recent Activity should reflect it
+    // too. Organic media carries no campaign_id, so channelCampaigns
+    // (campaign attribution) is correctly left untouched here.
+    // ponytail: no dedup against campaign_posts by media_id — if the app ever
+    // publishes IG posts through its own pipeline AND the poller backfills
+    // the same media, it'll double-count. Add a media_id column to
+    // campaign_posts and dedupe on it if/when that becomes real traffic.
+    if (!channelKey || channelKey === 'instagram') {
+      try {
+        const { tenantId } = await authCtx(supabase)
+        const qs = new URLSearchParams({ tenant_id: tenantId, date_from: startIso, date_to: endIso })
+        const res = await fetch(`${FASTAPI_URL}/api/instagram/insights?${qs.toString()}`)
+        if (res.ok) {
+          const ig = (await res.json()) as { posts?: Array<{ mediaId: string; caption: string | null; at: string | null }> }
+          const igPosts = (ig.posts ?? []).filter((p) => inRange(p.at))
+          if (igPosts.length) {
+            const v = byChannel.get('instagram') ?? { channel: 'instagram', total: 0, published: 0 }
+            v.total += igPosts.length
+            v.published += igPosts.length
+            byChannel.set('instagram', v)
+            activity.push(...igPosts.map((p) => ({
+              id: p.mediaId,
+              kind: 'published' as const,
+              title: p.caption?.slice(0, 80) || 'Instagram post',
+              channel: 'instagram',
+              campaign: null,
+              status: 'published',
+              at: p.at,
+            })))
+          }
+        }
+      } catch (e) {
+        console.error('[getMarketingAnalytics] instagram merge failed:', e)
+      }
+    }
+
+    const channelVolume = [...byChannel.values()].sort((a, b) => b.total - a.total)
+    activity = activity
+      .sort((a, b) => String(b.at ?? '').localeCompare(String(a.at ?? '')))
+      .slice(0, 12)
+
     // ── ROI (real) ──────────────────────────────────────────────────────────
     const best = [...byCampaign.values()].sort((a, b) => b.leads - a.leads)[0]
     const postsPublished = posts.filter((p) => p.status === 'published' && inRange(p.published_at)).length
@@ -412,7 +455,6 @@ export const getMarketingAnalytics = createServerFn({ method: 'GET' })
     // campaign_insights has no channel dimension, so when a single channel is
     // selected we only narrow what IS per-channel real: post volume, the
     // campaigns active on that channel, and the activity feed.
-    const channelKey = data.channel && data.channel !== 'all' ? data.channel : null
     let outChannelVolume = channelVolume
     let outActivity = activity
     let channelCampaigns: Array<AnalyticsChannelCampaign> = []
@@ -554,6 +596,15 @@ export interface InstagramPostInsight {
   status: InstagramMetricsStatus
 }
 
+// One point per UTC day, from real follower snapshots taken by the analytics
+// poller. `net` is the day-over-day delta — null on the very first snapshot,
+// which has nothing to diff against.
+export interface InstagramAudiencePoint {
+  date: string
+  followers: number
+  net: number | null
+}
+
 export interface InstagramInsights {
   connected: boolean
   handle: string | null
@@ -567,6 +618,7 @@ export interface InstagramInsights {
   likesMetricsStatus: InstagramMetricsStatus
   topPosts: Array<InstagramPostInsight>
   posts: Array<InstagramPostInsight>
+  audience: Array<InstagramAudiencePoint>
 }
 
 export const getInstagramInsights = createServerFn({ method: 'GET' })
@@ -577,7 +629,7 @@ export const getInstagramInsights = createServerFn({ method: 'GET' })
       postsTracked: 0, postsWithStats: 0,
       likes: 0, comments: 0, engagement: 0, avgEngagementPerPost: 0,
       likesMetricsStatus: 'unavailable',
-      topPosts: [], posts: [],
+      topPosts: [], posts: [], audience: [],
     }
     try {
       const supabase = getSupabaseServerClient()
@@ -632,6 +684,20 @@ export const refreshLinkedInAnalytics = createServerFn({ method: 'POST' }).handl
     const supabase = getSupabaseServerClient()
     const { tenantId } = await authCtx(supabase)
     const res = await fetch(`${FASTAPI_URL}/api/linkedin/analytics/refresh`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tenant_id: tenantId }),
+    })
+    if (!res.ok) throw new Error(`Refresh failed: ${res.statusText}`)
+    return res.json()
+  },
+)
+
+export const refreshInstagramAnalytics = createServerFn({ method: 'POST' }).handler(
+  async (): Promise<{ status: string }> => {
+    const supabase = getSupabaseServerClient()
+    const { tenantId } = await authCtx(supabase)
+    const res = await fetch(`${FASTAPI_URL}/api/instagram/analytics/refresh`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ tenant_id: tenantId }),

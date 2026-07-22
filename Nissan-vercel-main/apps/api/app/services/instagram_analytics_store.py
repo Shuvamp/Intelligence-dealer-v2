@@ -109,6 +109,8 @@ async def insert_post_metrics(
     likes: int | None = None,
     comments: int | None = None,
     error_message: str | None = None,
+    reach: int | None = None,
+    impressions: int | None = None,
 ) -> None:
     row = {
         "id": str(uuid.uuid4()),
@@ -116,6 +118,8 @@ async def insert_post_metrics(
         "media_id": media_id,
         "likes": likes,
         "comments": comments,
+        "reach": reach,
+        "impressions": impressions,
         "status": status,
         "error_message": (error_message or "")[:500] or None,
         "captured_at": _now(),
@@ -126,6 +130,72 @@ async def insert_post_metrics(
             r.raise_for_status()
     except Exception:  # noqa: BLE001
         logger.exception("[instagram:analytics] insert_post_metrics failed media_id=%s", media_id)
+
+
+async def insert_account_metrics(
+    tenant_id: str,
+    status: str,
+    ig_user_id: str | None = None,
+    followers: int | None = None,
+    error_message: str | None = None,
+) -> None:
+    """Snapshot the account's current follower total. Best-effort — never raises."""
+    row = {
+        "id": str(uuid.uuid4()),
+        "tenant_id": tenant_id,
+        "ig_user_id": ig_user_id,
+        "followers": followers,
+        "status": status,
+        "error_message": (error_message or "")[:500] or None,
+        "captured_at": _now(),
+    }
+    try:
+        async with httpx.AsyncClient(base_url=SUPABASE_URL, timeout=10) as c:
+            r = await c.post("/rest/v1/instagram_account_metrics", json=row, headers=_headers())
+            r.raise_for_status()
+    except Exception:  # noqa: BLE001
+        logger.exception("[instagram:analytics] insert_account_metrics failed tenant=%s", tenant_id)
+
+
+async def get_account_metrics(tenant_id: str, limit: int = 1000) -> list[dict]:
+    """Follower snapshots for a tenant, oldest first (chart order)."""
+    try:
+        async with httpx.AsyncClient(base_url=SUPABASE_URL, timeout=15) as c:
+            r = await c.get(
+                "/rest/v1/instagram_account_metrics",
+                params={
+                    "tenant_id": f"eq.{tenant_id}",
+                    "status": "eq.ok",
+                    "order": "captured_at.asc",
+                    "limit": str(limit),
+                },
+                headers=_headers(),
+            )
+            r.raise_for_status()
+            return r.json()
+    except Exception:  # noqa: BLE001
+        logger.exception("[instagram:analytics] get_account_metrics failed tenant=%s", tenant_id)
+        return []
+
+
+async def refresh_campaign_insights(tenant_id: str) -> int:
+    """Roll this tenant's Instagram engagement into public.campaign_insights.
+
+    All the work is in the SQL function (supabase/migrations/0053_...): posts are
+    attributed to campaigns by publish-date window and only `engagement` is
+    written, since instagram_basic can't observe reach/impressions/spend.
+    Best-effort — never raises. Returns rows written (0 on failure)."""
+    try:
+        async with httpx.AsyncClient(base_url=SUPABASE_URL, timeout=30) as c:
+            r = await c.post(
+                "/rest/v1/rpc/refresh_campaign_insights_from_instagram",
+                json={"p_tenant": tenant_id}, headers=_headers(),
+            )
+            r.raise_for_status()
+            return int(r.json() or 0)
+    except Exception:  # noqa: BLE001
+        logger.exception("[instagram:analytics] refresh_campaign_insights failed tenant=%s", tenant_id)
+        return 0
 
 
 async def get_latest_post_metrics(tenant_id: str) -> dict[str, dict]:

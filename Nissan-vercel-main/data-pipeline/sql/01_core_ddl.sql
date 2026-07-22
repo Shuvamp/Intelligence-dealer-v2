@@ -87,8 +87,11 @@ CREATE TABLE IF NOT EXISTS bronze.channel_insights_raw (
     tenant_id uuid NOT NULL,
     received_at timestamptz NOT NULL DEFAULT now(),
     channel text, external_post_id text, campaign_id text, metric_date date,
-    impressions bigint, clicks bigint, spend numeric,
+    impressions bigint, reach bigint, clicks bigint, spend numeric,
     engagements bigint, leads bigint, payload jsonb);
+
+-- Older prototype DBs were created before `reach` existed.
+ALTER TABLE bronze.channel_insights_raw ADD COLUMN IF NOT EXISTS reach bigint;
 
 -- ---------------------------------------------------------------------
 -- SILVER - APP-OWNED tables (written by the tenant-aware intake path).

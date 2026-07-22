@@ -27,7 +27,7 @@ CREATE SCHEMA IF NOT EXISTS gold;
 
 CREATE OR REPLACE VIEW silver.stg_channel_insights AS
 select tenant_id, channel, external_post_id, campaign_id, metric_date,
-       impressions, clicks, spend, engagements, leads
+       impressions, coalesce(reach, 0) as reach, clicks, spend, engagements, leads
 from bronze.channel_insights_raw;
 
 CREATE OR REPLACE VIEW silver.stg_festivals AS
@@ -170,7 +170,7 @@ select row_number() over (
            order by tenant_id, metric_date, channel, external_post_id
        ) as metric_id,
        tenant_id, campaign_id, channel, external_post_id, metric_date,
-       impressions, clicks, spend, engagements, leads
+       impressions, reach, clicks, spend, engagements, leads
 from silver.stg_channel_insights;
 
 CREATE OR REPLACE VIEW silver.fact_inventory AS
@@ -286,6 +286,27 @@ left join silver.dim_campaign cp
        on cp.tenant_id  = m.tenant_id
       and cp.campaign_id = m.campaign_id
 group by m.tenant_id, m.campaign_id, cp.campaign_name;
+
+-- Same facts at DAY grain. Feeds the bridge loader's public.campaign_insights
+-- pass — the spine stores one insight row per campaign per capture date, and the
+-- Marketing dashboard's trend chart and period filter both key off that date, so
+-- the lifetime rollup above can't serve it.
+CREATE OR REPLACE VIEW gold.mart_campaign_performance_daily AS
+select m.tenant_id, m.campaign_id, cp.campaign_name, m.metric_date,
+       sum(m.impressions)  as impressions,
+       sum(m.reach)        as reach,
+       sum(m.engagements)  as engagement,
+       sum(m.clicks)       as clicks,
+       sum(m.spend)        as spend,
+       sum(m.leads)        as leads,
+       case when sum(m.leads) > 0
+            then round(sum(m.spend) / sum(m.leads), 2)
+       end as cost_per_lead
+from silver.fact_channel_metrics m
+left join silver.dim_campaign cp
+       on cp.tenant_id  = m.tenant_id
+      and cp.campaign_id = m.campaign_id
+group by m.tenant_id, m.campaign_id, cp.campaign_name, m.metric_date;
 
 -- Executive workload + conversion. Feeds Lead Assignment agent.
 CREATE OR REPLACE VIEW gold.serving_executive_workload AS

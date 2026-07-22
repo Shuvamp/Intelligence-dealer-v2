@@ -6,11 +6,21 @@ tenant_id so it obeys the ADIP isolation rule and is RLS-ready. Persists each
 agent OUTPUT (write-back) and logs the run.
 """
 import json
+import os
 from datetime import datetime, date, timedelta, timezone
 from platform_sim.db import connect
 
 now = datetime.now(timezone.utc); today = date.today()
-ABC = "11111111-1111-1111-1111-111111111111"
+# Default is the demo dealer. Point at a real dealer via PIPELINE_TENANT_ID so
+# the bridge loader can attach these facts to that dealer's spine rows — it
+# skips any tenant that isn't in public.tenants.
+ABC = os.environ.get("PIPELINE_TENANT_ID", "11111111-1111-1111-1111-111111111111")
+
+# Channel metrics are emitted per campaign per channel per day over this window,
+# so downstream day-grain marts (and the dashboard's date filter) have a series
+# to plot rather than one lump on today's date.
+METRIC_DAYS = int(os.environ.get("PIPELINE_METRIC_DAYS", "60"))
+CAMPAIGN_CODES = ["C-DIWALI", "C-KICKSEMI", "C-XTRAIL", "C-SUNNY", "C-MICRA"]
 
 INVENTORY = [
     ("Magnite","XV Turbo","Bengaluru-South",3,1050000),
@@ -43,6 +53,41 @@ def reset(cur):
                  agent.content_asset, agent.campaign_plan RESTART IDENTITY CASCADE;
         TRUNCATE agent.agent_run_log RESTART IDENTITY;
     """)
+
+
+def emit_channel_metrics(cur, posts):
+    """One bronze row per published post per day over the METRIC_DAYS window.
+
+    Deterministic (no RNG) so reruns after a TRUNCATE reproduce the same series
+    and the bridge loader stays idempotent. Each post belongs to one campaign,
+    round-robin over CAMPAIGN_CODES.
+    """
+    rows = []
+    for i, (channel, post_id) in enumerate(posts):
+        code = CAMPAIGN_CODES[i % len(CAMPAIGN_CODES)]
+        for d in range(METRIC_DAYS):
+            metric_date = today - timedelta(days=d)
+            # Weekday seasonality (weekends quieter) + a mild upward trend
+            # towards the present, so the trend chart isn't a flat line.
+            weekday = 0.7 if metric_date.weekday() >= 5 else 1.0
+            trend = 1.0 + (METRIC_DAYS - d) / (METRIC_DAYS * 2.0)
+            wobble = 0.85 + ((i * 7 + d * 13) % 30) / 100.0
+            factor = weekday * trend * wobble
+
+            impressions = int(1500 * factor)
+            reach       = int(impressions * 0.68)
+            clicks      = int(impressions * 0.04)
+            engagements = int(impressions * 0.08)
+            leads       = int(clicks * 0.05)
+            spend       = round(clicks * 12.5, 2)
+            rows.append((ABC, channel, post_id, code, metric_date, impressions,
+                         reach, clicks, spend, engagements, leads, json.dumps({})))
+
+    cur.executemany("""INSERT INTO bronze.channel_insights_raw
+                       (tenant_id,channel,external_post_id,campaign_id,metric_date,
+                        impressions,reach,clicks,spend,engagements,leads,payload)
+                       VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""", rows)
+    return len(rows)
 
 
 def main():
@@ -92,16 +137,16 @@ def main():
 
     cur.execute("SELECT asset_id FROM agent.content_asset WHERE status='approved'")
     approved = [r[0] for r in cur.fetchall()]
+    posts = []
     for aid in approved:
         for ch in ["facebook","instagram","gbp","website"]:
             pid = f"{ch[:2]}-{aid}-{plan_id}"
             cur.execute("""INSERT INTO agent.publish_log (tenant_id,asset_id,channel,external_post_id,status,published_at)
                            VALUES (%s,%s,%s,%s,'published',%s)""", (ABC, aid, ch, pid, now))
             log_run(cur, "publishing", {"asset_id": aid, "channel": ch})
-            cur.execute("""INSERT INTO bronze.channel_insights_raw
-                           (tenant_id,channel,external_post_id,campaign_id,metric_date,impressions,clicks,spend,engagements,leads,payload)
-                           VALUES (%s,%s,%s,'C-DIWALI',%s,%s,%s,%s,%s,%s,%s)""",
-                        (ABC, ch, pid, today, 12000, 480, 6000, 950, 18, json.dumps({})))
+            posts.append((ch, pid))
+
+    emit_channel_metrics(cur, posts)
 
     conn.commit()
     cur.execute("SELECT count(*) FROM agent.publish_log")
