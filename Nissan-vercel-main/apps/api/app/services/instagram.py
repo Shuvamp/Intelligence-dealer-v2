@@ -21,6 +21,11 @@ SCOPES = [
     "pages_read_engagement",
     "instagram_basic",
     "instagram_content_publish",
+    # Required for per-media reach/impressions (/{media-id}/insights). While the
+    # Meta app is in Development mode it's granted to admins/testers/developers
+    # without App Review; going live needs Advanced Access for this permission.
+    # Tokens issued before this line was added lack it — reconnect Instagram.
+    "instagram_manage_insights",
 ]
 
 # ── CSRF state store ──────────────────────────────────────────────────────────
@@ -217,6 +222,33 @@ async def get_media_list(ig_user_id: str, access_token: str, limit: int = 50) ->
         return "error"
 
 
+async def get_account_followers(ig_user_id: str, access_token: str) -> dict:
+    """GET /{ig-user-id}?fields=followers_count — current follower total.
+
+    Deliberately NOT the `follower_count` insights metric (daily net gain):
+    that needs the instagram_manage_insights scope, Meta app review and every
+    tenant reconnecting. This field comes with instagram_basic, which the app
+    already holds — growth is derived by diffing stored snapshots instead.
+    A 200 missing the field degrades to "unavailable" rather than 0.
+    """
+    try:
+        async with httpx.AsyncClient() as client:
+            r = await client.get(
+                f"https://graph.facebook.com/{META_API_VERSION}/{ig_user_id}",
+                params={"access_token": access_token, "fields": "followers_count"},
+                timeout=15,
+            )
+        if not r.is_success:
+            logger.warning("[instagram:analytics] get_account_followers failed ig_user_id=%s status=%d body=%s",
+                           ig_user_id, r.status_code, r.text)
+            return {"followers": None, "status": classify_meta_error(r.status_code)}
+        followers = r.json().get("followers_count")
+        return {"followers": followers, "status": "ok" if followers is not None else "unavailable"}
+    except Exception:  # noqa: BLE001
+        logger.exception("[instagram:analytics] get_account_followers crashed ig_user_id=%s", ig_user_id)
+        return {"followers": None, "status": "error"}
+
+
 async def get_media_stats(media_id: str, access_token: str) -> dict:
     """GET /{media-id}?fields=id,caption,like_count,comments_count.
 
@@ -248,6 +280,53 @@ async def get_media_stats(media_id: str, access_token: str) -> dict:
     except Exception:  # noqa: BLE001
         logger.exception("[instagram:analytics] get_media_stats crashed media_id=%s", media_id)
         return {"likes": None, "comments": None, "likes_status": "unavailable", "status": "error"}
+
+
+async def get_media_insights(media_id: str, access_token: str) -> dict:
+    """GET /{media-id}/insights — per-post reach + impressions.
+
+    Needs instagram_manage_insights. Metric names moved: `impressions` was
+    dropped for media in Graph v22 and replaced by `views`, so this asks for
+    `reach,views` first and falls back to the old `reach,impressions` for
+    tenants pinned to an older META_API_VERSION, then to `reach` alone (some
+    media types report nothing else). Whichever answers, `views`/`impressions`
+    lands in the same impressions slot.
+
+    Anything still missing comes back as None -> stored as NULL, never 0: a
+    zero here would read as "nobody saw this post", a different claim from
+    "Instagram won't tell us".
+    """
+    async def _fetch(metrics: str) -> dict | None:
+        async with httpx.AsyncClient() as client:
+            r = await client.get(
+                f"https://graph.facebook.com/{META_API_VERSION}/{media_id}/insights",
+                params={"access_token": access_token, "metric": metrics},
+                timeout=15,
+            )
+        if not r.is_success:
+            logger.warning("[instagram:analytics] get_media_insights failed media_id=%s metrics=%s status=%d body=%s",
+                           media_id, metrics, r.status_code, r.text)
+            return None
+        out: dict = {"_status": "ok"}
+        for item in r.json().get("data", []):
+            values = item.get("values") or [{}]
+            out[item.get("name")] = values[0].get("value")
+        return out
+
+    try:
+        body = (await _fetch("reach,views")
+                or await _fetch("reach,impressions")
+                or await _fetch("reach"))
+        if body is None:
+            return {"reach": None, "impressions": None, "status": "unavailable"}
+        return {
+            "reach": body.get("reach"),
+            "impressions": body.get("views") if body.get("views") is not None else body.get("impressions"),
+            "status": "ok",
+        }
+    except Exception:  # noqa: BLE001
+        logger.exception("[instagram:analytics] get_media_insights crashed media_id=%s", media_id)
+        return {"reach": None, "impressions": None, "status": "error"}
 
 
 async def get_media_comments(media_id: str, access_token: str, limit: int = 25) -> list[dict]:

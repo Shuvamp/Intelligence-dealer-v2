@@ -230,6 +230,37 @@ async def instagram_sync(req: SyncRequest):
     return {"status": "success", "last_sync": now}
 
 
+def build_audience_series(
+    snapshots: list[dict], date_from: str | None = None, date_to: str | None = None,
+) -> list[dict]:
+    """Follower snapshots → one point per UTC day, with a day-over-day delta.
+
+    The last snapshot of each day wins (snapshots arrive oldest-first). Deltas
+    are computed over the FULL history *before* the range filter, so the first
+    in-range point still shows a real change rather than null. `net` is null
+    only for the very first day ever recorded — nothing to diff against.
+    """
+    by_day: dict[str, int] = {}
+    for snap in snapshots:
+        followers = snap.get("followers")
+        if followers is None:
+            continue
+        by_day[(snap.get("captured_at") or "")[:10]] = followers
+
+    series: list[dict] = []
+    prev: int | None = None
+    for day in sorted(by_day):
+        total = by_day[day]
+        series.append({"date": day, "followers": total, "net": None if prev is None else total - prev})
+        prev = total
+
+    if date_from:
+        series = [p for p in series if p["date"] >= date_from[:10]]
+    if date_to:
+        series = [p for p in series if p["date"] <= date_to[:10]]
+    return series
+
+
 @router.get("/insights")
 async def instagram_insights(
     tenant_id: str = Query(...),
@@ -251,7 +282,7 @@ async def instagram_insights(
         "postsTracked": 0, "postsWithStats": 0,
         "likes": 0, "comments": 0, "engagement": 0, "avgEngagementPerPost": 0,
         "likesMetricsStatus": "unavailable",
-        "topPosts": [], "posts": [],
+        "topPosts": [], "posts": [], "audience": [],
     }
 
     row = await channel_store.get(tenant_id, "instagram")
@@ -294,6 +325,10 @@ async def instagram_insights(
     engagement = likes + comments
     top = sorted(per, key=lambda x: (x["likes"] or 0) + (x["comments"] or 0), reverse=True)[:10]
 
+    audience = build_audience_series(
+        await analytics_store.get_account_metrics(tenant_id), date_from, date_to,
+    )
+
     return {
         "connected": True,
         "handle": row.get("handle"),
@@ -307,6 +342,7 @@ async def instagram_insights(
         "likesMetricsStatus": likes_status,
         "topPosts": top,
         "posts": per,
+        "audience": audience,
     }
 
 

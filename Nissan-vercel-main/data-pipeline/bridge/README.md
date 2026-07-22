@@ -1,7 +1,8 @@
 # Bridge loader — pipeline → ADIP spine
 
 Takes the pipeline's `silver.*` / `gold.*` output and writes it into the ADIP
-spine (`public.customers / leads / lead_events / market_signals`) so the
+spine (`public.customers / leads / lead_events / market_signals /
+campaign_insights`) so the
 existing web screens (Dashboard, Leads board, Intelligence) render real,
 multi-tenant data computed from our pipeline.
 
@@ -44,9 +45,12 @@ psql -v ON_ERROR_STOP=1 -f sql/02_spine_bridge_state.sql
 
 ```bash
 # Generate pipeline facts (silver + gold). Existing scripts, unchanged.
-python -m platform_sim.intake
+# PIPELINE_TENANT_ID must be a real public.tenants id or the loader skips the
+# facts; PIPELINE_METRIC_DAYS (default 60) sets the channel-metrics window.
+export PIPELINE_TENANT_ID=<uuid from public.tenants>
+python -m platform_sim.intake        # still uses its own demo tenants
 python -m platform_sim.marketing
-dbt build --project-dir dbt --profiles-dir dbt
+psql -v ON_ERROR_STOP=1 -f sql/03_build_marts.sql
 
 # Bridge silver/gold -> public.*
 python -m bridge.load
@@ -56,8 +60,9 @@ Re-running `python -m bridge.load` is idempotent: customers are upserted via
 the `silver.spine_customer_map` sidecar; leads upsert by
 `(tenant_id, customer_id, source)`; lead_events / market_signals delete
 bridge-tagged rows (`metadata->>'src' = 'pipeline'` /
-`source_module = 'pipeline'`) and reinsert. UI- and agent-authored rows are
-never touched.
+`source_module = 'pipeline'`) and reinsert; campaign_insights deletes only the
+rows of campaigns present in `silver.spine_campaign_map` and reinserts. UI- and
+agent-authored rows are never touched.
 
 ## Acceptance checks
 
@@ -84,7 +89,7 @@ Then, signed in as a real account in the web app:
 
 | file | role |
 |---|---|
-| `load.py` | the loader (driver + 4 passes) |
+| `load.py` | the loader (driver + 5 passes) |
 | `mapping.py` | pure source/score/stage/event-type/severity mappers (no DB) |
 | `test_mapping.py` | unit tests for `mapping.py` |
 | `verify.sql` | per-tenant counts, FK integrity, RLS isolation, spot checks |
@@ -92,8 +97,10 @@ Then, signed in as a real account in the web app:
 
 ## What the loader does NOT do (yet)
 
-- Load `public.campaign_insights` from `gold.mart_campaign_performance` —
-  follow-up.
+- Create campaigns. The campaign_insights pass attaches facts to campaigns the
+  dealer already has (round-robin, frozen in `silver.spine_campaign_map`); a
+  tenant with zero `public.campaigns` rows is skipped with a warning.
+- Observe `conversions` / `conversion_rate` — those columns stay NULL.
 - Real source ingestion. Bronze/silver are still populated by the
   `platform_sim.intake` simulator; facts remain pipeline-generated.
 - Map silver's free-text `region` to a specific `public.locations` row.

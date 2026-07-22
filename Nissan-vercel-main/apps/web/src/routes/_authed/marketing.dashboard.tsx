@@ -1,21 +1,31 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { createFileRoute, Link, useRouter } from '@tanstack/react-router'
 import { Zap, RefreshCw, Info } from 'lucide-react'
-import { getMarketingAnalytics, getChannelStatus, getLinkedInInsights, getInstagramInsights } from '#/lib/marketing'
-import type { AnalyticsPreset, AnalyticsRange, AnalyticsCampaignRow } from '#/lib/marketing'
-import { DateRangeFilter } from '#/components/marketing/analytics/DateRangeFilter'
-import { ChannelFilter, CHANNELS } from '#/components/marketing/analytics/ChannelFilter'
-import { PerformanceTrend, ChannelPerformance, ChannelDistribution } from '#/components/marketing/analytics/AnalyticsCharts'
 import {
-  KpiCards, CampaignLeaderboard, RoiSection, ActivityFeed, NotTracked,
-} from '#/components/marketing/analytics/AnalyticsSections'
+  getMarketingAnalytics, getChannelStatus, getLinkedInInsights, getInstagramInsights, getCampaigns,
+  resolveAnalyticsRange, refreshInstagramAnalytics,
+} from '#/lib/marketing'
+import type { AnalyticsPreset, AnalyticsRange, AnalyticsCampaignRow } from '#/lib/marketing'
+import { CHANNELS } from '#/components/marketing/analytics/ChannelFilter'
+import { ChannelPerformance, ChannelDistribution } from '#/components/marketing/analytics/AnalyticsCharts'
+import { ActivityFeed, NotTracked } from '#/components/marketing/analytics/AnalyticsSections'
 import {
   ConnectedChannelsCard, LinkedInInsightsPanel, InstagramInsightsPanel, ChannelCampaignsTable,
 } from '#/components/marketing/analytics/ChannelPanels'
+import { DashboardFilters } from '#/components/marketing/dashboard/DashboardFilters'
+import { KpiRow } from '#/components/marketing/dashboard/KpiRow'
+import { AiInsightsPanel } from '#/components/marketing/dashboard/AiInsightsPanel'
+import { TopPerformingPosts, CampaignPerformanceTable, PostPerformanceTable } from '#/components/marketing/dashboard/Tables'
+import {
+  ReachTrendChart, EngagementOverviewChart, ContentTypePerformance,
+  BestTimeHeatmap, AudienceGrowthChart, EngagementFunnel,
+} from '#/components/marketing/dashboard/Charts'
 
 const PRESETS: ReadonlyArray<AnalyticsPreset> = [
   'today', 'last7', 'last30', 'this_month', 'last_month', 'this_year', 'custom',
 ]
+
+const MEDIA_LABEL: Record<string, string> = { IMAGE: 'Images', VIDEO: 'Videos', CAROUSEL_ALBUM: 'Carousels' }
 
 export const Route = createFileRoute('/_authed/marketing/dashboard')({
   // Date + channel filters live in the URL → shareable; changing either re-runs the loader.
@@ -36,28 +46,80 @@ export const Route = createFileRoute('/_authed/marketing/dashboard')({
       : deps.channel === 'all' ? 'all'
       : connected.length === 1 ? connected[0]!
       : 'all'
-    const [analytics, linkedin, instagram] = await Promise.all([
+    // Previous period, same length, immediately before the current range —
+    // powers the "vs previous period" deltas on the new KPI cards. Reuses
+    // resolveAnalyticsRange (already exported) instead of re-deriving date math.
+    const { start, end } = resolveAnalyticsRange(deps)
+    const spanMs = end.getTime() - start.getTime()
+    const prevRange: AnalyticsRange = {
+      preset: 'custom',
+      from: new Date(start.getTime() - spanMs - 1).toISOString(),
+      to: new Date(start.getTime() - 1).toISOString(),
+    }
+    const fetchInstagram = effectiveChannel === 'instagram' || effectiveChannel === 'all'
+    const [analytics, linkedin, instagram, campaigns, prevAnalytics, prevInstagram] = await Promise.all([
       getMarketingAnalytics({ data: { ...deps, channel: effectiveChannel } }),
       effectiveChannel === 'linkedin' ? getLinkedInInsights({ data: deps }) : Promise.resolve(null),
-      effectiveChannel === 'instagram' ? getInstagramInsights({ data: deps }) : Promise.resolve(null),
+      fetchInstagram ? getInstagramInsights({ data: deps }) : Promise.resolve(null),
+      getCampaigns(),
+      getMarketingAnalytics({ data: { ...prevRange, channel: effectiveChannel } }),
+      fetchInstagram ? getInstagramInsights({ data: prevRange }) : Promise.resolve(null),
     ])
-    return { analytics, connections, linkedin, instagram, effectiveChannel }
+    return { analytics, connections, linkedin, instagram, campaigns, prevAnalytics, prevInstagram, effectiveChannel }
   },
   component: MarketingDashboard,
+  pendingComponent: DashboardSkeleton,
 })
 
+function DashboardSkeleton() {
+  return (
+    <div className="min-h-full bg-[#F4F5F7]">
+      <div className="mx-auto max-w-[1400px] space-y-5 p-6">
+        <div className="h-16 animate-pulse rounded-[16px] bg-[#E9EAEE]" />
+        <div className="h-12 animate-pulse rounded-[16px] bg-[#E9EAEE]" />
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-4 xl:grid-cols-8">
+          {Array.from({ length: 8 }, (_, i) => <div key={i} className="h-28 animate-pulse rounded-[16px] bg-[#E9EAEE]" />)}
+        </div>
+        <div className="grid grid-cols-1 gap-5 lg:grid-cols-2 xl:grid-cols-3">
+          {Array.from({ length: 3 }, (_, i) => <div key={i} className="h-[320px] animate-pulse rounded-[16px] bg-[#E9EAEE]" />)}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function MarketingDashboard() {
-  const { analytics, connections, linkedin, instagram, effectiveChannel } = Route.useLoaderData()
+  const { analytics, connections, linkedin, instagram, campaigns, prevAnalytics, prevInstagram, effectiveChannel } = Route.useLoaderData()
   const search = Route.useSearch()
   const navigate = Route.useNavigate()
   const router = useRouter()
   const [selected, setSelected] = useState<AnalyticsCampaignRow | null>(null)
+  const [compareEnabled, setCompareEnabled] = useState(true)
+  const [campaignFilter, setCampaignFilter] = useState('')
+  const [contentTypeFilter, setContentTypeFilter] = useState('')
+  const [vehicleFilter, setVehicleFilter] = useState('')
 
   // Real-time: re-run the loader on an interval so live insight/post updates appear.
+  // Note this only re-reads what the backend poller has already stored — use
+  // "Refresh now" to pull fresh like/comment counts from Instagram immediately.
   useEffect(() => {
     const id = setInterval(() => { void router.invalidate() }, 60_000)
     return () => clearInterval(id)
   }, [router])
+
+  const [refreshing, setRefreshing] = useState(false)
+  const instagramConnected = connections.some((c) => c.channel === 'instagram' && c.status === 'connected')
+  const onRefreshNow = async () => {
+    setRefreshing(true)
+    try {
+      await refreshInstagramAnalytics()
+      await router.invalidate()
+    } catch (e) {
+      console.error('[marketing.dashboard] instagram refresh failed', e)
+    } finally {
+      setRefreshing(false)
+    }
+  }
 
   const setRange = (r: AnalyticsRange) =>
     navigate({ search: (prev) => ({ ...prev, preset: r.preset, from: r.from, to: r.to }), replace: true })
@@ -68,7 +130,94 @@ function MarketingDashboard() {
   const scoped = effectiveChannel !== 'all'
   const channelLabel = CHANNELS.find((c) => c.key === effectiveChannel)?.label ?? effectiveChannel
 
+  const campaignsById = useMemo(() => new Map(campaigns.map((c) => [c.id, c])), [campaigns])
+  const campaignOptions = useMemo(() => campaigns.map((c) => ({ value: c.id, label: c.name })), [campaigns])
+  const vehicleOptions = useMemo(
+    () => [...new Set(campaigns.flatMap((c) => c.vehicles ?? []))].map((v) => ({ value: v, label: v })),
+    [campaigns],
+  )
+  const contentTypeOptions = useMemo(() => {
+    const types = new Set((instagram?.posts ?? []).map((p) => p.mediaType).filter((t): t is string => !!t))
+    return [...types].map((t) => ({ value: t, label: MEDIA_LABEL[t] ?? t }))
+  }, [instagram])
+
+  const filteredLeaderboard = useMemo(
+    () => analytics.leaderboard.filter((row) => {
+      if (campaignFilter && row.campaign_id !== campaignFilter) return false
+      if (vehicleFilter && !campaignsById.get(row.campaign_id)?.vehicles?.includes(vehicleFilter)) return false
+      return true
+    }),
+    [analytics.leaderboard, campaignFilter, vehicleFilter, campaignsById],
+  )
+  const filteredPosts = useMemo(
+    () => (instagram?.posts ?? []).filter((p) => !contentTypeFilter || p.mediaType === contentTypeFilter),
+    [instagram, contentTypeFilter],
+  )
+  const filteredTopPosts = useMemo(
+    () => (instagram?.topPosts ?? []).filter((p) => !contentTypeFilter || p.mediaType === contentTypeFilter),
+    [instagram, contentTypeFilter],
+  )
+
+  const onExport = () => {
+    const rows = [
+      ['Metric', 'Value'],
+      ['Total Reach', String(analytics.kpis.reach)],
+      ['Impressions', String(analytics.kpis.impressions)],
+      ['Likes', String(instagram?.likes ?? 'N/A')],
+      ['Comments', String(instagram?.comments ?? 'N/A')],
+      ['Leads', String(analytics.kpis.leads)],
+      [],
+      ['Campaign', 'Posts', 'Reach', 'Engagement', 'Leads'],
+      ...filteredLeaderboard.map((r) => [r.name, String(campaignsById.get(r.campaign_id)?.postCount ?? ''), String(r.reach), String(r.engagement), String(r.leads)]),
+    ]
+    const csv = rows.map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n')
+    const blob = new Blob([csv], { type: 'text/csv' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `marketing-report-${fmtDate(analytics.range.start)}_${fmtDate(analytics.range.end)}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  // The analytics body is identical for the Instagram-scoped view and the
+  // All-Channels view — one definition, rendered in both branches.
+  const body = (
+    <>
+      {/* Row — reach trend + engagement overview + AI insights rail */}
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-2 xl:grid-cols-3">
+        <ReachTrendChart data={analytics.trend} />
+        <EngagementOverviewChart data={analytics.trend} />
+        <AiInsightsPanel posts={filteredPosts} bestCampaign={analytics.roi.bestCampaign} />
+      </div>
+
+      {/* Row — top posts + campaign performance + content type mix */}
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-2 xl:grid-cols-3">
+        <TopPerformingPosts posts={filteredTopPosts} />
+        <CampaignPerformanceTable leaderboard={filteredLeaderboard} campaigns={campaigns} />
+        <ContentTypePerformance posts={filteredPosts} />
+      </div>
+
+      {/* Row — best time to post + audience growth + engagement funnel */}
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-2 xl:grid-cols-3">
+        <BestTimeHeatmap posts={filteredPosts} />
+        <AudienceGrowthChart data={instagram?.audience ?? []} />
+        <EngagementFunnel
+          impressions={analytics.kpis.impressions}
+          reach={analytics.kpis.reach}
+          likes={instagram?.likes ?? null}
+          comments={instagram?.comments ?? null}
+          leads={analytics.kpis.leads}
+        />
+      </div>
+
+      {/* Row — full-width post performance table */}
+      <PostPerformanceTable posts={filteredPosts} />
+    </>
+  )
+
   return (
+    <div className="min-h-full bg-[#F4F5F7]">
     <div className="mx-auto max-w-[1400px] space-y-5 p-6">
       {/* Header */}
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -83,20 +232,39 @@ function MarketingDashboard() {
             <span>{fmtDate(analytics.range.start)} → {fmtDate(analytics.range.end)}</span>
           </p>
         </div>
-        <Link
-          to="/marketing/campaign-planner"
-          className="flex items-center gap-2 rounded-[12px] bg-[#C3002F] px-4 py-2 text-[13px] font-semibold text-white transition hover:bg-[#a50027]"
-        >
-          <Zap className="h-4 w-4" /> New Campaign
-        </Link>
+        <div className="flex items-center gap-2">
+          {instagramConnected && (
+            <button
+              onClick={onRefreshNow}
+              disabled={refreshing}
+              className="flex items-center gap-2 rounded-[12px] border border-[#E5E7EB] bg-white px-4 py-2 text-[13px] font-semibold text-[#1A1A1A] transition hover:bg-[#F5F5F5] disabled:opacity-60"
+            >
+              <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
+              {refreshing ? 'Refreshing…' : 'Refresh now'}
+            </button>
+          )}
+          <Link
+            to="/marketing/campaign-planner"
+            className="flex items-center gap-2 rounded-[12px] bg-[#C3002F] px-4 py-2 text-[13px] font-semibold text-white transition hover:bg-[#a50027]"
+          >
+            <Zap className="h-4 w-4" /> New Campaign
+          </Link>
+        </div>
       </div>
 
       {/* Global filters */}
-      <DateRangeFilter value={search} onChange={setRange} />
-      <ChannelFilter value={effectiveChannel} onChange={setChannel} connections={connections} />
+      <DashboardFilters
+        range={search} onRangeChange={setRange}
+        channel={effectiveChannel} onChannelChange={setChannel} connections={connections}
+        compareEnabled={compareEnabled} onCompareToggle={() => setCompareEnabled((v) => !v)}
+        campaignOptions={campaignOptions} campaign={campaignFilter} onCampaignChange={setCampaignFilter}
+        contentTypeOptions={contentTypeOptions} contentType={contentTypeFilter} onContentTypeChange={setContentTypeFilter}
+        vehicleOptions={vehicleOptions} vehicle={vehicleFilter} onVehicleChange={setVehicleFilter}
+        onExport={onExport}
+      />
 
       {scoped ? (
-        /* ───────── Single-channel view ───────── */
+        /* ───────── Single-channel view (unchanged from prior release) ───────── */
         <>
           <div className="flex items-center gap-2 rounded-[12px] border border-[#E5E7EB] bg-[#FAFAFA] px-4 py-2.5 text-[12px] text-[#6B7280]">
             <Info className="h-4 w-4 shrink-0 text-[#9CA3AF]" />
@@ -111,28 +279,32 @@ function MarketingDashboard() {
           )}
 
           {effectiveChannel === 'instagram' && instagram && (
-            <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
-              <div className="lg:col-span-2"><InstagramInsightsPanel data={instagram} /></div>
-              <ConnectedChannelsCard connections={connections} />
-            </div>
+            <>
+              <InstagramInsightsPanel data={instagram} showTopPosts={false} />
+              {body}
+            </>
           )}
 
-          <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
-            <ChannelPerformance data={analytics.channelVolume} />
-            <ChannelCampaignsTable rows={analytics.channelCampaigns} channelLabel={channelLabel} />
-          </div>
+          {effectiveChannel !== 'instagram' && (
+            <>
+              <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+                <ChannelPerformance data={analytics.channelVolume} />
+                <ChannelCampaignsTable rows={analytics.channelCampaigns} channelLabel={channelLabel} />
+              </div>
 
-          <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
-            <ActivityFeed items={analytics.activity} filterCampaign={null} onClearFilter={() => {}} />
-            {effectiveChannel !== 'linkedin' && effectiveChannel !== 'instagram' && <ConnectedChannelsCard connections={connections} />}
-            <NotTracked
-              title={`${channelLabel} Performance Metrics`}
-              lines={['Reach & impressions per channel', 'Engagement & engagement rate', 'Leads attributed per channel']}
-            />
-          </div>
+              <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
+                <ActivityFeed items={analytics.activity} filterCampaign={null} onClearFilter={() => {}} />
+                {effectiveChannel !== 'linkedin' && <ConnectedChannelsCard connections={connections} />}
+                <NotTracked
+                  title={`${channelLabel} Performance Metrics`}
+                  lines={['Reach & impressions per channel', 'Engagement & engagement rate', 'Leads attributed per channel']}
+                />
+              </div>
+            </>
+          )}
         </>
       ) : (
-        /* ───────── All Channels view ───────── */
+        /* ───────── All Channels — executive Instagram analytics dashboard ───────── */
         <>
           {!analytics.availability.insights && (
             <div className="flex items-center gap-2 rounded-[12px] border border-amber-200 bg-amber-50 px-4 py-3 text-[12px] text-amber-800">
@@ -141,38 +313,27 @@ function MarketingDashboard() {
             </div>
           )}
 
-          <KpiCards kpis={analytics.kpis} />
-
-          <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
-            <div className="lg:col-span-2"><PerformanceTrend data={analytics.trend} /></div>
-            <RoiSection roi={analytics.roi} />
-          </div>
-
-          <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
-            <ChannelPerformance data={analytics.channelVolume} />
-            <ChannelDistribution data={analytics.channelVolume} />
-          </div>
-
-          <CampaignLeaderboard
-            rows={analytics.leaderboard}
-            selectedId={selected?.campaign_id ?? null}
-            onSelect={setSelected}
+          {/* Row 1 — 8 executive KPIs */}
+          <KpiRow
+            kpis={analytics.kpis}
+            prevKpis={compareEnabled ? prevAnalytics.kpis : { ...analytics.kpis, reach: 0, impressions: 0, leads: 0 }}
+            instagram={instagram}
+            prevInstagram={compareEnabled ? prevInstagram : null}
           />
 
-          <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
+          {body}
+
+          <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
             <ActivityFeed
               items={analytics.activity}
               filterCampaign={selected?.name ?? null}
               onClearFilter={() => setSelected(null)}
             />
-            <ConnectedChannelsCard connections={connections} />
-            <div className="space-y-5">
-              <NotTracked title="Content Performance" lines={['Top / lowest posts', 'Engagement rate per post']} />
-              <NotTracked title="Audience Insights" lines={['Followers growth', 'New vs returning', 'Profile views']} />
-            </div>
+            <ChannelDistribution data={analytics.channelVolume} />
           </div>
         </>
       )}
+    </div>
     </div>
   )
 }

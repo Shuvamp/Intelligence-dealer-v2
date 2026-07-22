@@ -75,7 +75,12 @@ LINKEDIN_API_VERSION: str = os.getenv("LINKEDIN_API_VERSION", "202606")
 # until the app is actually approved — flip to true then reconnect LinkedIn.
 LINKEDIN_ORG_SCOPES_ENABLED: bool = os.getenv("LINKEDIN_ORG_SCOPES_ENABLED", "false").lower() == "true"
 LINKEDIN_ANALYTICS_POLL_SECONDS: int = int(os.getenv("LINKEDIN_ANALYTICS_POLL_SECONDS", "1800"))
-INSTAGRAM_ANALYTICS_POLL_SECONDS: int = int(os.getenv("INSTAGRAM_ANALYTICS_POLL_SECONDS", "1800"))
+# 30 min made new likes/comments take up to half an hour to reach the dashboard.
+# A tick costs ~1 Graph call per tracked post, and Meta's platform limit is
+# ~200 calls/hour/user, so 5 min is the floor that keeps a normal account
+# (≤15 posts → ~180 calls/hour) inside it. Use the dashboard's Refresh button
+# for an immediate update instead of dropping this lower.
+INSTAGRAM_ANALYTICS_POLL_SECONDS: int = int(os.getenv("INSTAGRAM_ANALYTICS_POLL_SECONDS", "300"))
 
 # ── YouTube / Google OAuth ─────────────────────────────────────────────────
 GOOGLE_CLIENT_ID: str = os.getenv("GOOGLE_CLIENT_ID", "")

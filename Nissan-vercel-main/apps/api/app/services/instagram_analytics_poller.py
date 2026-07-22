@@ -56,9 +56,13 @@ async def _refresh_post(tenant_id: str, token: str, post: dict) -> None:
     media_id = post["media_id"]
     stats = await ig.get_media_stats(media_id, token)
     status = stats["status"] if stats["status"] != "ok" else stats["likes_status"]
+    # reach/impressions come from a separate endpoint (instagram_manage_insights);
+    # it failing must not lose the like/comment counts we already have.
+    insights = await ig.get_media_insights(media_id, token)
     await store.insert_post_metrics(
         tenant_id, media_id, status,
         likes=stats["likes"], comments=stats["comments"],
+        reach=insights["reach"], impressions=insights["impressions"],
     )
 
 
@@ -72,6 +76,14 @@ async def refresh_tenant(tenant_id: str, connection: dict) -> None:
     except Exception:  # noqa: BLE001
         logger.exception("[instagram:analytics] backfill failed tenant=%s", tenant_id)
 
+    try:
+        acct = await ig.get_account_followers(ig_user_id, token)
+        await store.insert_account_metrics(
+            tenant_id, acct["status"], ig_user_id=ig_user_id, followers=acct["followers"],
+        )
+    except Exception:  # noqa: BLE001
+        logger.exception("[instagram:analytics] follower snapshot failed tenant=%s", tenant_id)
+
     posts = await store.get_posts_for_tenant(tenant_id)
     for post in posts:
         try:
@@ -79,6 +91,11 @@ async def refresh_tenant(tenant_id: str, connection: dict) -> None:
         except Exception:  # noqa: BLE001 — one bad post never blocks the rest
             logger.exception("[instagram:analytics] post refresh failed tenant=%s media_id=%s",
                               tenant_id, post.get("media_id"))
+
+    # Fresh snapshots are in; roll them into the Marketing dashboard's
+    # campaign_insights (post -> campaign by publish-date window).
+    n = await store.refresh_campaign_insights(tenant_id)
+    logger.info("[instagram:analytics] campaign insights refreshed tenant=%s rows=%d", tenant_id, n)
 
 
 async def _tick() -> None:
