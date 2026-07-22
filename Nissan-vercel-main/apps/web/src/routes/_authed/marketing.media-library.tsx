@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useMemo } from 'react'
 import { createFileRoute } from '@tanstack/react-router'
-import { getMediaAssets, deleteAsset } from '#/lib/marketing'
+import { getMediaAssets, deleteAsset, setAssetCampaignSelected } from '#/lib/marketing'
 import type { MediaAsset } from '#/lib/types'
 import { AssetUploadDialog } from '#/components/marketing/AssetUploadDialog'
 import { AssetDetailDrawer } from '#/components/marketing/AssetDetailDrawer'
@@ -69,6 +69,11 @@ function MediaLibrary() {
   const [vehicleFilter, setVehicleFilter] = useState<string>('all')
 
   const [selected, setSelected] = useState<string[]>([])
+  // Campaign-planner selection — DB-backed (marketing_assets.campaign_selected),
+  // tenant-shared. Seeded from the loaded rows; toggles persist to Supabase.
+  const [campaignSel, setCampaignSel] = useState<Set<string>>(
+    () => new Set(initialAssets.filter((a) => a.campaign_selected).map((a) => a.id)),
+  )
   const [pendingFile, setPendingFile] = useState<PendingFile | null>(null)
   const [uploadOpen, setUploadOpen] = useState(false)
   const [deleting, setDeleting] = useState(false)
@@ -92,6 +97,33 @@ function MediaLibrary() {
       try { localStorage.setItem(FAV_KEY, JSON.stringify([...next])) } catch { /* ignore */ }
       return next
     })
+  }
+
+  // ---- Campaign selection (fed to the campaign planner, persisted to Supabase) ----
+  function toggleCampaign(id: string) {
+    const selecting = !campaignSel.has(id)
+    setCampaignSel((prev) => {
+      const next = new Set(prev)
+      selecting ? next.add(id) : next.delete(id)
+      return next
+    })
+    // Persist; revert the optimistic toggle on failure.
+    setAssetCampaignSelected({ data: { assetId: id, selected: selecting } }).catch(() => {
+      setCampaignSel((prev) => {
+        const next = new Set(prev)
+        selecting ? next.delete(id) : next.add(id)
+        return next
+      })
+    })
+  }
+  function clearCampaign() {
+    const ids = [...campaignSel]
+    setCampaignSel(new Set())
+    ids.forEach((id) => { void setAssetCampaignSelected({ data: { assetId: id, selected: false } }).catch(() => {}) })
+  }
+  function dropFromCampaign(ids: string[]) {
+    // Row is being trashed/deleted — just drop from the local set (flag goes with the row).
+    setCampaignSel((prev) => new Set([...prev].filter((x) => !ids.includes(x))))
   }
 
   // ---- Derived data ----
@@ -182,6 +214,7 @@ function MediaLibrary() {
     setTrashed((t) => [...moving, ...t])
     setAssets((prev) => prev.filter((a) => !ids.includes(a.id)))
     setSelected((s) => s.filter((x) => !ids.includes(x)))
+    dropFromCampaign(ids)
     if (detail && ids.includes(detail.id)) setDetail(null)
   }
   function restore(ids: string[]) {
@@ -340,24 +373,25 @@ function MediaLibrary() {
           <div className="flex items-center gap-2">
             <span className="text-[12px] text-muted-foreground num">{filtered.length} {filtered.length === 1 ? 'item' : 'items'}</span>
 
-            {selected.length > 0 && (
+            {inTrash && selected.length > 0 && (
               <div className="flex items-center gap-2 ml-2 pl-3 border-l border-border">
                 <span className="text-[12px] font-semibold text-[var(--brand)]">{selected.length} selected</span>
                 <button onClick={() => setSelected([])} className="rounded-[8px] border border-border px-2 py-1 text-[11px] font-semibold hover:bg-muted/40 transition">Clear</button>
-                {inTrash ? (
-                  <>
-                    <button onClick={() => restore(selected)} className="inline-flex items-center gap-1 rounded-[8px] border border-border px-2 py-1 text-[11px] font-semibold hover:bg-muted/40 transition">
-                      <RotateCcw className="h-3 w-3" /> Restore
-                    </button>
-                    <button onClick={() => purge(selected)} disabled={deleting} className="inline-flex items-center gap-1 rounded-[8px] border border-red-200 bg-red-50 px-2 py-1 text-[11px] font-semibold text-[var(--brand)] hover:bg-red-100 transition disabled:opacity-50">
-                      <Trash2 className="h-3 w-3" /> {deleting ? 'Deleting…' : 'Delete forever'}
-                    </button>
-                  </>
-                ) : (
-                  <button onClick={() => softDelete(selected)} className="inline-flex items-center gap-1 rounded-[8px] border border-red-200 bg-red-50 px-2 py-1 text-[11px] font-semibold text-[var(--brand)] hover:bg-red-100 transition">
-                    <Trash2 className="h-3 w-3" /> Move to Trash
-                  </button>
-                )}
+                <button onClick={() => restore(selected)} className="inline-flex items-center gap-1 rounded-[8px] border border-border px-2 py-1 text-[11px] font-semibold hover:bg-muted/40 transition">
+                  <RotateCcw className="h-3 w-3" /> Restore
+                </button>
+                <button onClick={() => purge(selected)} disabled={deleting} className="inline-flex items-center gap-1 rounded-[8px] border border-red-200 bg-red-50 px-2 py-1 text-[11px] font-semibold text-[var(--brand)] hover:bg-red-100 transition disabled:opacity-50">
+                  <Trash2 className="h-3 w-3" /> {deleting ? 'Deleting…' : 'Delete forever'}
+                </button>
+              </div>
+            )}
+            {!inTrash && campaignSel.size > 0 && (
+              <div className="flex items-center gap-2 ml-2 pl-3 border-l border-border">
+                <span className="text-[12px] font-semibold text-[var(--brand)]">{campaignSel.size} selected for campaigns</span>
+                <button onClick={clearCampaign} className="rounded-[8px] border border-border px-2 py-1 text-[11px] font-semibold hover:bg-muted/40 transition">Clear</button>
+                <button onClick={() => softDelete([...campaignSel])} className="inline-flex items-center gap-1 rounded-[8px] border border-red-200 bg-red-50 px-2 py-1 text-[11px] font-semibold text-[var(--brand)] hover:bg-red-100 transition">
+                  <Trash2 className="h-3 w-3" /> Move to Trash
+                </button>
               </div>
             )}
           </div>
@@ -418,11 +452,11 @@ function MediaLibrary() {
                   key={asset.id}
                   asset={asset}
                   index={i}
-                  selected={selected.includes(asset.id)}
+                  selected={inTrash ? selected.includes(asset.id) : campaignSel.has(asset.id)}
                   favorite={favorites.has(asset.id)}
                   copied={copiedId === asset.id}
                   inTrash={inTrash}
-                  onToggleSel={() => toggleSel(asset.id)}
+                  onToggleSel={() => (inTrash ? toggleSel(asset.id) : toggleCampaign(asset.id))}
                   onOpen={() => setDetail(asset)}
                   onCopy={() => copyUrl(asset)}
                   onFav={() => toggleFavorite(asset.id)}
@@ -434,10 +468,10 @@ function MediaLibrary() {
           ) : (
             <ListView
               assets={filtered}
-              selected={selected}
+              selected={inTrash ? selected : [...campaignSel]}
               favorites={favorites}
               inTrash={inTrash}
-              onToggleSel={toggleSel}
+              onToggleSel={inTrash ? toggleSel : toggleCampaign}
               onOpen={setDetail}
               onFav={toggleFavorite}
             />

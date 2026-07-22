@@ -419,6 +419,7 @@ export interface CampaignSummary extends Campaign {
   goal?: string | null
   selected_assets?: SelectedAsset[]
   selected_logo?: SelectedAsset | null
+  selected_logo_2?: SelectedAsset | null
 }
 
 export interface CampaignScorecard extends CampaignInsight {
@@ -573,6 +574,8 @@ export interface MediaAsset {
   file_size?: number | null
   metadata?: string | null
   created_at: string
+  campaign_selected?: boolean | null      // picked for the campaign planner
+  campaign_selected_at?: string | null     // pick order (top-left logo first)
 }
 
 export interface SelectedAsset {
@@ -699,6 +702,7 @@ export interface CampaignPlanInput {
   campaign_color?: string | null
   selected_assets?: SelectedAsset[]
   selected_logo?: SelectedAsset | null
+  selected_logo_2?: SelectedAsset | null
 }
 
 export interface CampaignDay extends GeneratedContent {
@@ -721,6 +725,7 @@ export interface CampaignPlanResult {
   campaign_color?: string | null
   selected_assets?: SelectedAsset[]
   selected_logo?: SelectedAsset | null
+  selected_logo_2?: SelectedAsset | null
 }
 
 export interface DealershipMember {

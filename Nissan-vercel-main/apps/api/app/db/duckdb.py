@@ -87,7 +87,7 @@ async def _delete(path: str, params: Any) -> None:
 _CAMPAIGN_SELECT = (
     "campaign_id:id,tenant_id,name,objective,status,start_date,end_date,"
     "post_count,published_count,channels,theme,campaign_color,campaign_hashtags,"
-    "posting_time,vehicle,goal,selected_assets,selected_logo,synced_at"
+    "posting_time,vehicle,goal,selected_assets,selected_logo,selected_logo_2,synced_at"
 )
 
 
@@ -111,6 +111,7 @@ async def upsert_campaign(row: dict[str, Any]) -> None:
         "goal": row.get("goal"),
         "selected_assets": row.get("selected_assets"),
         "selected_logo": row.get("selected_logo"),
+        "selected_logo_2": row.get("selected_logo_2"),
         "synced_at": _sync_now(),
     }
     await _post(

@@ -7,7 +7,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '#/components/ui/dialog'
-import { generateCampaignPlan, createCampaignFromPlan, getAssets, suggestCampaignDescription } from '#/lib/marketing'
+import { generateCampaignPlan, createCampaignFromPlan, getMediaAssets, suggestCampaignDescription } from '#/lib/marketing'
 import type { CampaignGoal, CampaignPlanInput, CampaignPlanResult, CampaignType, MediaAsset, SelectedAsset } from '#/lib/types'
 import { cn } from '#/lib/utils'
 import { getVoiceProvider, type VoiceSession } from './voiceInput'
@@ -23,8 +23,6 @@ const CAMPAIGN_TYPES: CampaignType[] = [
   'Brand Awareness Campaign',
 ]
 
-const VEHICLES = ['Magnite', 'Patrol', 'X-Trail', 'Sunny', 'Navara', 'Kicks'] as const
-
 const GOALS: CampaignGoal[] = [
   'Lead Generation',
   'Test Drive Booking',
@@ -34,7 +32,7 @@ const GOALS: CampaignGoal[] = [
   'Customer Retention',
 ]
 
-const STEPS = ['Details', 'Vehicles', 'Logo', 'Goal', 'Notes'] as const
+const STEPS = ['Details', 'Goal', 'Notes'] as const
 
 const emptyInput = (): CampaignPlanInput => ({
   campaign_name: '',
@@ -48,6 +46,7 @@ const emptyInput = (): CampaignPlanInput => ({
   campaign_color: '#C3002F',
   selected_assets: [],
   selected_logo: null,
+  selected_logo_2: null,
 })
 
 const fieldClass =
@@ -200,256 +199,6 @@ function CampaignSummaryView({ plan }: { plan: CampaignPlanResult }) {
   )
 }
 
-// ─── Asset Picker (Step 1 — Vehicles) ────────────────────────────────────────
-
-interface AssetPickerProps {
-  selectedAssets: SelectedAsset[]
-  onToggleAsset: (asset: MediaAsset, vehicle: string) => void
-  onAddWithoutImage: (vehicle: string) => void
-  onRemoveVehicle: (vehicle: string) => void
-}
-
-function AssetPicker({ selectedAssets, onToggleAsset, onAddWithoutImage, onRemoveVehicle }: AssetPickerProps) {
-  const [activeVehicle, setActiveVehicle] = useState<string>(VEHICLES[0])
-  const [vehicleAssets, setVehicleAssets] = useState<MediaAsset[]>([])
-  const [loadingAssets, setLoadingAssets] = useState(false)
-
-  useEffect(() => {
-    if (!activeVehicle) return
-    setLoadingAssets(true)
-    getAssets({ data: { vehicle: activeVehicle } })
-      .then(setVehicleAssets)
-      .catch(() => setVehicleAssets([]))
-      .finally(() => setLoadingAssets(false))
-  }, [activeVehicle])
-
-  const activeVehicleAssetIds = selectedAssets
-    .filter((a) => a.vehicle === activeVehicle)
-    .map((a) => a.asset_id)
-  const selectedVehicles = [...new Set(selectedAssets.map((a) => a.vehicle))]
-
-  return (
-    <div className="space-y-3">
-      <div>
-        <p className="text-[13px] font-semibold text-foreground">Select Vehicles & Assets</p>
-        <p className="text-[12px] text-muted-foreground mt-0.5">
-          Pick a vehicle, then select its campaign image. Or add without an image.
-        </p>
-      </div>
-
-      <div className="flex gap-3 h-[240px]">
-        <div className="flex flex-col gap-1.5 w-28 shrink-0">
-          {VEHICLES.map((v) => {
-            const isInCampaign = selectedVehicles.includes(v)
-            return (
-              <button
-                key={v}
-                type="button"
-                onClick={() => setActiveVehicle(v)}
-                className={cn(
-                  'flex items-center justify-between rounded-[10px] border px-2.5 py-2 text-[11px] font-semibold text-left transition',
-                  activeVehicle === v
-                    ? 'border-[#C3002F] bg-[#FFF8F8] text-[#C3002F]'
-                    : isInCampaign
-                      ? 'border-green-300 bg-green-50 text-green-700'
-                      : 'border-border text-muted-foreground hover:border-[#C3002F]/40',
-                )}
-              >
-                <span className="truncate">{v}</span>
-                {isInCampaign && <span className="text-[9px] ml-1">✓</span>}
-              </button>
-            )
-          })}
-        </div>
-
-        <div className="flex-1 overflow-y-auto">
-          {loadingAssets ? (
-            <div className="flex items-center justify-center h-full">
-              <Loader2 className="h-5 w-5 text-[#C3002F] animate-spin" />
-            </div>
-          ) : vehicleAssets.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-full gap-3 text-center">
-              <ImageIcon className="h-8 w-8 text-muted-foreground/30" />
-              <p className="text-[12px] text-muted-foreground">No assets for {activeVehicle} yet</p>
-              <button
-                type="button"
-                onClick={() => onAddWithoutImage(activeVehicle)}
-                disabled={selectedVehicles.includes(activeVehicle)}
-                className="rounded-[8px] border border-[#C3002F]/40 bg-[#FFF8F8] px-3 py-1.5 text-[11px] font-semibold text-[#C3002F] hover:bg-[#FFF0F3] transition disabled:opacity-40"
-              >
-                {selectedVehicles.includes(activeVehicle) ? '✓ Added' : `Add ${activeVehicle} without image`}
-              </button>
-            </div>
-          ) : (
-            <div className="grid grid-cols-3 gap-2 p-0.5">
-              {vehicleAssets.map((asset) => {
-                const isSel = activeVehicleAssetIds.includes(asset.id)
-                return (
-                  <button
-                    key={asset.id}
-                    type="button"
-                    onClick={() => onToggleAsset(asset, activeVehicle)}
-                    className={cn(
-                      'relative rounded-[10px] border overflow-hidden transition',
-                      isSel ? 'border-2 border-[#C3002F] shadow-sm' : 'border-border hover:border-[#C3002F]/50',
-                    )}
-                  >
-                    <div className="aspect-square bg-muted overflow-hidden">
-                      <img src={asset.file_url} alt={asset.name} className="w-full h-full object-cover" onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none' }} />
-                    </div>
-                    <div className="px-1.5 py-1 text-left">
-                      <p className="text-[9px] font-semibold text-foreground truncate">{asset.name}</p>
-                    </div>
-                    {isSel && (
-                      <div className="absolute top-1 right-1 h-4 w-4 rounded-full bg-[#C3002F] flex items-center justify-center">
-                        <span className="text-white text-[8px] font-bold">✓</span>
-                      </div>
-                    )}
-                  </button>
-                )
-              })}
-              <button
-                type="button"
-                onClick={() => onAddWithoutImage(activeVehicle)}
-                disabled={selectedVehicles.includes(activeVehicle) && !activeVehicleAssetIds.some((id) => id === '')}
-                className="aspect-square rounded-[10px] border border-dashed border-border flex flex-col items-center justify-center gap-1 text-center transition hover:border-[#C3002F]/40 disabled:opacity-40"
-              >
-                <ImageIcon className="h-4 w-4 text-muted-foreground" />
-                <span className="text-[8px] text-muted-foreground">No image</span>
-              </button>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {selectedVehicles.length > 0 && (
-        <div className="flex flex-wrap gap-1.5">
-          {selectedVehicles.map((v) => {
-            const assetForV = selectedAssets.find((a) => a.vehicle === v && a.file_url)
-            return (
-              <div key={v} className="flex items-center gap-1 rounded-full border border-[#C3002F]/30 bg-[#FFF8F8] pl-1.5 pr-2 py-0.5">
-                {assetForV?.file_url ? (
-                  <img src={assetForV.file_url} alt="" className="h-4 w-4 rounded-full object-cover" />
-                ) : (
-                  <span className="h-4 w-4 rounded-full bg-[#C3002F]/10 flex items-center justify-center">
-                    <ImageIcon className="h-2.5 w-2.5 text-[#C3002F]" />
-                  </span>
-                )}
-                <span className="text-[10px] font-semibold text-[#C3002F]">{v}</span>
-                <button type="button" onClick={() => onRemoveVehicle(v)} className="ml-0.5 text-[#C3002F]/50 hover:text-[#C3002F] text-[10px] font-bold">×</button>
-              </div>
-            )
-          })}
-        </div>
-      )}
-    </div>
-  )
-}
-
-// ─── Logo Picker (Step 2) ─────────────────────────────────────────────────────
-
-interface LogoPickerProps {
-  selectedLogo: SelectedAsset | null
-  onSelect: (logo: SelectedAsset | null) => void
-}
-
-function LogoPicker({ selectedLogo, onSelect }: LogoPickerProps) {
-  const [logos, setLogos] = useState<MediaAsset[]>([])
-  const [loading, setLoading] = useState(false)
-
-  useEffect(() => {
-    setLoading(true)
-    getAssets({ data: { asset_type: 'logo' } })
-      .then(setLogos)
-      .catch(() => setLogos([]))
-      .finally(() => setLoading(false))
-  }, [])
-
-  return (
-    <div className="space-y-4">
-      <div>
-        <p className="text-[13px] font-semibold text-foreground">Select Campaign Logo</p>
-        <p className="text-[12px] text-muted-foreground mt-0.5">
-          Choose a logo for this campaign. Upload logos in Media Library → Logo type.
-        </p>
-      </div>
-
-      {loading ? (
-        <div className="flex items-center justify-center py-10">
-          <Loader2 className="h-5 w-5 text-[#C3002F] animate-spin" />
-        </div>
-      ) : logos.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-10 gap-3 text-center rounded-[12px] border-2 border-dashed border-border bg-muted/20">
-          <ImageIcon className="h-10 w-10 text-muted-foreground/30" />
-          <div>
-            <p className="text-[13px] font-semibold text-foreground">No logos uploaded yet</p>
-            <p className="text-[12px] text-muted-foreground mt-0.5">
-              Go to Media Library, upload an image with type "Logo", then come back.
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={() => onSelect(null)}
-            className="rounded-[8px] border border-border px-4 py-1.5 text-[11px] font-semibold text-muted-foreground hover:bg-muted/40 transition"
-          >
-            Skip — no logo
-          </button>
-        </div>
-      ) : (
-        <>
-          <div className="grid grid-cols-3 gap-3">
-            {logos.map((logo) => {
-              const isSel = selectedLogo?.asset_id === logo.id
-              return (
-                <button
-                  key={logo.id}
-                  type="button"
-                  onClick={() => onSelect(isSel ? null : { vehicle: '__logo__', asset_id: logo.id, asset_name: logo.name, file_url: logo.file_url })}
-                  className={cn(
-                    'relative rounded-[12px] border overflow-hidden transition group',
-                    isSel ? 'border-2 border-[#C3002F] shadow-md bg-[#FFF8F8]' : 'border-border bg-white hover:border-[#C3002F]/50 hover:shadow-sm',
-                  )}
-                >
-                  <div className="aspect-square flex items-center justify-center bg-muted/30 p-3 overflow-hidden">
-                    <img
-                      src={logo.file_url}
-                      alt={logo.name}
-                      className="max-h-full max-w-full object-contain"
-                      onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none' }}
-                    />
-                  </div>
-                  <div className="px-2 py-1.5 border-t border-border text-left">
-                    <p className="text-[10px] font-semibold text-foreground truncate">{logo.name}</p>
-                  </div>
-                  {isSel && (
-                    <div className="absolute top-1.5 right-1.5 h-5 w-5 rounded-full bg-[#C3002F] flex items-center justify-center shadow">
-                      <span className="text-white text-[9px] font-bold">✓</span>
-                    </div>
-                  )}
-                </button>
-              )
-            })}
-          </div>
-
-          <button
-            type="button"
-            onClick={() => onSelect(null)}
-            className={cn(
-              'flex items-center gap-2 w-full rounded-[10px] border px-3 py-2.5 text-[12px] font-semibold transition',
-              !selectedLogo ? 'border-[#C3002F] bg-[#FFF8F8] text-[#C3002F]' : 'border-border text-muted-foreground hover:border-[#C3002F]/40',
-            )}
-          >
-            <span className={cn('h-3.5 w-3.5 rounded-full border shrink-0 flex items-center justify-center', !selectedLogo ? 'border-[#C3002F]' : 'border-border')}>
-              {!selectedLogo && <span className="h-2 w-2 rounded-full bg-[#C3002F] block" />}
-            </span>
-            No logo for this campaign
-          </button>
-        </>
-      )}
-    </div>
-  )
-}
-
 // ─── Posting Time Picker (12-hour with AM/PM) ─────────────────────────────────
 
 // Converts internal 24h "HH:MM" to display "hh:mm AM/PM".
@@ -521,6 +270,38 @@ function PostingTimePicker({ value, onChange }: { value: string; onChange: (v: s
   )
 }
 
+// ─── Media Selection Banner ───────────────────────────────────────────────────
+// Shows what the Media Library selection contributes (vehicles + logos). Campaigns
+// no longer pick media in the wizard — they inherit the library selection.
+
+function MediaSelectionBanner({ loading, vehicleCount, logoCount, onOpenLibrary }: {
+  loading: boolean; vehicleCount: number; logoCount: number; onOpenLibrary: () => void
+}) {
+  const has = vehicleCount + logoCount > 0
+  return (
+    <div className={cn(
+      'rounded-[10px] border px-3 py-2.5 text-[12px]',
+      loading ? 'border-border bg-muted/30 text-muted-foreground'
+        : has ? 'border-green-200 bg-green-50 text-green-700'
+        : 'border-amber-200 bg-amber-50 text-amber-700',
+    )}>
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2 min-w-0">
+          {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin shrink-0" /> : <ImageIcon className="h-3.5 w-3.5 shrink-0" />}
+          <span className="truncate">
+            {loading ? 'Loading your Media Library selection…'
+              : has ? `Using ${vehicleCount} vehicle image${vehicleCount === 1 ? '' : 's'} + ${logoCount} logo${logoCount === 1 ? '' : 's'} from Media Library.`
+              : 'No media selected. Pick vehicles & logos in Media Library — they’ll be used on the posters.'}
+          </span>
+        </div>
+        <button type="button" onClick={onOpenLibrary} className="shrink-0 font-semibold underline underline-offset-2 hover:opacity-80">
+          Media Library
+        </button>
+      </div>
+    </div>
+  )
+}
+
 // ─── Wizard Shell ─────────────────────────────────────────────────────────────
 
 interface Props {
@@ -567,6 +348,7 @@ export function CampaignPlannerWizard({ open, onOpenChange, defaultValues }: Pro
   const [generating, setGenerating] = useState(false)
   const [summary, setSummary] = useState<CampaignPlanResult | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [mediaLoading, setMediaLoading] = useState(false)
   const [suggestingDesc, setSuggestingDesc] = useState(false)
   const [isListening, setIsListening] = useState(false)
   const [voiceError, setVoiceError] = useState<string | null>(null)
@@ -602,11 +384,35 @@ export function CampaignPlannerWizard({ open, onOpenChange, defaultValues }: Pro
       setIsListening(false)
       setVoiceError(null)
       setVoiceStatus('idle')
+      void loadCampaignMedia()
     } else {
       if (voiceRetryTimerRef.current) clearTimeout(voiceRetryTimerRef.current)
       voiceSessionRef.current?.stop()
     }
   }, [open]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Pull the assets flagged in the Media Library (Supabase campaign_selected) →
+  // vehicles + up to two logos (1st top-left, 2nd top-right, by pick order).
+  const loadCampaignMedia = async () => {
+    setMediaLoading(true)
+    try {
+      const all = await getMediaAssets({ data: {} })
+      const picked = all.filter((a) => a.campaign_selected)
+      const vehicles = picked.filter((a) => a.asset_type === 'vehicle')
+      const logos = picked
+        .filter((a) => a.asset_type === 'logo')
+        .sort((a, b) => (a.campaign_selected_at ?? '').localeCompare(b.campaign_selected_at ?? ''))
+      const toLogo = (a: MediaAsset): SelectedAsset => ({ vehicle: '__logo__', asset_id: a.id, asset_name: a.name, file_url: a.file_url })
+      setForm((prev) => ({
+        ...prev,
+        selected_assets: vehicles.map((a) => ({ vehicle: a.vehicle || a.name, asset_id: a.id, asset_name: a.name, file_url: a.file_url })),
+        vehicles: [...new Set(vehicles.map((a) => a.vehicle || a.name))],
+        selected_logo: logos[0] ? toLogo(logos[0]) : null,
+        selected_logo_2: logos[1] ? toLogo(logos[1]) : null,
+      }))
+    } catch { /* leave media empty; user can still generate */ }
+    finally { setMediaLoading(false) }
+  }
 
   // Clean up on unmount
   useEffect(() => () => {
@@ -740,37 +546,8 @@ export function CampaignPlannerWizard({ open, onOpenChange, defaultValues }: Pro
   const set = (k: keyof CampaignPlanInput, v: unknown) =>
     setForm((prev) => ({ ...prev, [k]: v }))
 
-  function toggleAsset(asset: MediaAsset, vehicle: string) {
-    setForm((prev) => {
-      const existing = (prev.selected_assets ?? []).find((a) => a.asset_id === asset.id && a.vehicle === vehicle)
-      let newAssets: SelectedAsset[]
-      if (existing) {
-        newAssets = (prev.selected_assets ?? []).filter((a) => !(a.asset_id === asset.id && a.vehicle === vehicle))
-      } else {
-        const newEntry: SelectedAsset = { vehicle, asset_id: asset.id, asset_name: asset.name, file_url: asset.file_url }
-        newAssets = [...(prev.selected_assets ?? []), newEntry]
-      }
-      return { ...prev, selected_assets: newAssets, vehicles: [...new Set(newAssets.map((a) => a.vehicle))] }
-    })
-  }
-
-  function addWithoutImage(vehicle: string) {
-    setForm((prev) => {
-      const alreadyAdded = (prev.selected_assets ?? []).some((a) => a.vehicle === vehicle)
-      if (alreadyAdded) return prev
-      const newAssets = [...(prev.selected_assets ?? []), { vehicle, asset_id: '', asset_name: vehicle, file_url: null }]
-      return { ...prev, selected_assets: newAssets, vehicles: [...new Set(newAssets.map((a) => a.vehicle))] }
-    })
-  }
-
-  function removeVehicle(vehicle: string) {
-    setForm((prev) => {
-      const newAssets = (prev.selected_assets ?? []).filter((a) => a.vehicle !== vehicle)
-      return { ...prev, selected_assets: newAssets, vehicles: [...new Set(newAssets.map((a) => a.vehicle))] }
-    })
-  }
-
-  // Step validation
+  // Step validation. Vehicles + logos now come from the Media Library selection,
+  // so only Details is gated; Goal + Notes are always valid.
   const step0Valid =
     !!form.campaign_name.trim() &&
     !!form.campaign_type &&
@@ -778,13 +555,9 @@ export function CampaignPlannerWizard({ open, onOpenChange, defaultValues }: Pro
     !!form.end_date &&
     !!form.posting_time.trim() &&
     form.start_date <= form.end_date
-  const step1Valid = (form.selected_assets?.length ?? 0) > 0 || form.vehicles.length > 0
-  // step2 (Logo) — always valid (optional)
-  // step3 (Goal) — always valid
-  // step4 (Notes) — always valid
-  const stepValid = [step0Valid, step1Valid, true, true, true]
+  const stepValid = [step0Valid, true, true]
 
-  const LAST_STEP = STEPS.length - 1 // 4
+  const LAST_STEP = STEPS.length - 1 // 2
 
   const handleNext = () => { if (step < LAST_STEP) setStep(step + 1) }
   const handleBack = () => { if (step > 0) setStep(step - 1) }
@@ -792,7 +565,10 @@ export function CampaignPlannerWizard({ open, onOpenChange, defaultValues }: Pro
   const handleSuggestDesc = async () => {
     setSuggestingDesc(true)
     try {
-      const desc = await suggestCampaignDescription({ data: { campaign_name: form.campaign_name, campaign_type: form.campaign_type } })
+      const vehicles = form.selected_assets?.length
+        ? [...new Set(form.selected_assets.map((a) => a.vehicle))]
+        : form.vehicles
+      const desc = await suggestCampaignDescription({ data: { campaign_name: form.campaign_name, campaign_type: form.campaign_type, vehicles, goal: form.goal } })
       if (desc) set('notes', desc)
     } catch { /* silently ignore */ }
     finally { setSuggestingDesc(false) }
@@ -857,31 +633,17 @@ export function CampaignPlannerWizard({ open, onOpenChange, defaultValues }: Pro
                 />
               </div>
             </div>
+            <MediaSelectionBanner
+              loading={mediaLoading}
+              vehicleCount={form.selected_assets?.length ?? 0}
+              logoCount={[form.selected_logo, form.selected_logo_2].filter(Boolean).length}
+              onOpenLibrary={() => { handleClose(); void router.navigate({ to: '/marketing/media-library' }) }}
+            />
           </div>
         )
 
-      // ── Step 1: Vehicles ─────────────────────────────────────────────────────
+      // ── Step 1: Goal ─────────────────────────────────────────────────────────
       case 1:
-        return (
-          <AssetPicker
-            selectedAssets={form.selected_assets ?? []}
-            onToggleAsset={toggleAsset}
-            onAddWithoutImage={addWithoutImage}
-            onRemoveVehicle={removeVehicle}
-          />
-        )
-
-      // ── Step 2: Logo ─────────────────────────────────────────────────────────
-      case 2:
-        return (
-          <LogoPicker
-            selectedLogo={form.selected_logo ?? null}
-            onSelect={(logo) => set('selected_logo', logo)}
-          />
-        )
-
-      // ── Step 3: Goal ─────────────────────────────────────────────────────────
-      case 3:
         return (
           <div className="space-y-3">
             <div>
@@ -906,11 +668,21 @@ export function CampaignPlannerWizard({ open, onOpenChange, defaultValues }: Pro
                 </button>
               ))}
             </div>
+            <div className="pt-1">
+              <label className={labelClass}>Or describe your own goal</label>
+              <textarea
+                className={`${fieldClass} resize-none`}
+                rows={2}
+                value={(GOALS as readonly string[]).includes(form.goal) ? '' : form.goal}
+                onChange={(e) => set('goal', e.target.value as CampaignGoal)}
+                placeholder="e.g. Drive weekend showroom footfall with an exchange offer"
+              />
+            </div>
           </div>
         )
 
-      // ── Step 4: Notes ─────────────────────────────────────────────────────────
-      case 4: {
+      // ── Step 2: Notes ─────────────────────────────────────────────────────────
+      case 2: {
         const selectedVehicles = form.selected_assets?.length
           ? [...new Set(form.selected_assets.map((a) => a.vehicle))]
           : form.vehicles

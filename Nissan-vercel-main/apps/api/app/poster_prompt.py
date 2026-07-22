@@ -27,6 +27,14 @@ BRAND_STYLE = (
     "advertising look. Use ₹ for any prices. Photoreal, high-end commercial photography."
 )
 
+# Dealer contact bar rendered along the bottom footer of every poster.
+# ponytail: hardcoded single-dealer (Vignesh Nissan) footer — move to
+# tenant/locations DB once those rows carry address + phone data.
+DEALER_FOOTER = (
+    "Locations: Puducherry | Cuddalore | Viluppuram. "
+    "Contact: +91 70944 41991 | +91 86808 88191 | +91 84899 44191."
+)
+
 # Mandatory canvas spec — portrait 4:5 only.
 _FORMAT_RULE = (
     "CANVAS: Strict VERTICAL PORTRAIT format — 4:5 aspect ratio (1080×1350 px). "
@@ -48,17 +56,26 @@ _NO_ANNOTATIONS_RULE = (
     "content goes, not text to draw."
 )
 
-def _layout_zones(has_logo: bool) -> str:
+def _layout_zones(has_logo: bool, has_logo2: bool = False) -> str:
     """Return the layout instruction, top-to-bottom, as plain prose (no ZONE-style labels)."""
-    top_strip = (
-        "Top strip: USE ONLY the logo from the FIRST image provided as input. "
-        "Render it EXACTLY as given — preserve every colour, shape, and letter. "
-        "Do NOT redesign, recolour, shrink, crop, replace, or in any way alter it. "
-        "Do NOT substitute it with any stock Nissan logo, generated emblem, or default branding. "
-        "Place it top-left or top-center."
-        if has_logo else
-        "Top strip: Nissan logo (top-left or top-center) + campaign badge/tagline chip."
-    )
+    if has_logo and has_logo2:
+        top_strip = (
+            "Top strip: TWO logos, one in each top corner, taken VERBATIM from the input images. "
+            "Place the FIRST input image (dealer logo) in the TOP-LEFT corner and the SECOND input "
+            "image (Nissan brand logo) in the TOP-RIGHT corner. Render BOTH exactly as given — "
+            "preserve every colour, shape, and letter. Do NOT redesign, recolour, crop, swap their "
+            "corners, merge them, or substitute either with a generated or stock emblem."
+        )
+    elif has_logo:
+        top_strip = (
+            "Top strip: USE ONLY the logo from the FIRST image provided as input. "
+            "Render it EXACTLY as given — preserve every colour, shape, and letter. "
+            "Do NOT redesign, recolour, shrink, crop, replace, or in any way alter it. "
+            "Do NOT substitute it with any stock Nissan logo, generated emblem, or default branding. "
+            "Place it in the TOP-LEFT corner, and render the Nissan brand logo in the TOP-RIGHT corner."
+        )
+    else:
+        top_strip = "Top strip: dealer logo in the top-left corner + Nissan brand logo in the top-right corner."
     return (
         "LAYOUT — stack five sections top to bottom, none may be omitted:\n"
         f"  {top_strip}\n"
@@ -66,7 +83,9 @@ def _layout_zones(has_logo: bool) -> str:
         "  Middle section: Hero vehicle — large, fully visible, sharp, dynamically lit. "
         "The car must not be cropped; show the full body including wheels.\n"
         "  Lower section: Offer details (price/discount/EMI) + prominent CTA (e.g. 'Book Now', 'Test Drive').\n"
-        "  Bottom strip: Fine-print disclaimer / T&C in small legible text."
+        "  Bottom strip: a slim branded footer bar spanning the full width with a location pin icon and a "
+        f"phone icon, showing this dealer contact info in small but legible text — {DEALER_FOOTER} "
+        "Spell every location and phone number EXACTLY as given."
     )
 
 # Channel → secondary composition hint (portrait format already enforced above).
@@ -116,6 +135,7 @@ def build_poster_prompt(
     channel: str | None = None,
     has_car_image: bool = False,
     has_logo: bool = False,
+    has_logo2: bool = False,
     instructions: str | None = None,
     mode: str = "create",
 ) -> str:
@@ -157,7 +177,7 @@ def build_poster_prompt(
 
     _NO_ANNOTATIONS_RULE,
 
-    _layout_zones(has_logo),
+    _layout_zones(has_logo, has_logo2),
 
     "The final image should resemble a professionally designed Nissan India advertising campaign similar to premium festival, lifestyle, family, seasonal, awareness or promotional campaigns.",
 
@@ -190,16 +210,22 @@ def build_poster_prompt(
 ]
     if offer:
         lines.append(f'Add a small premium offer badge with the text "{offer}".')
-    if has_logo:
+    if has_logo and has_logo2:
         lines.append(
-            "LOGO MANDATE (highest priority): The logo in the top strip MUST be taken verbatim from the "
+            "LOGO MANDATE (highest priority): render BOTH input logos pixel-perfect — the FIRST input "
+            "image (dealer logo) in the TOP-LEFT corner, the SECOND input image (Nissan brand logo) in "
+            "the TOP-RIGHT corner. Same colours, shapes, and text; do NOT swap corners, merge, redesign, "
+            "recolour, or substitute either with a generated or stock emblem."
+        )
+    elif has_logo:
+        lines.append(
+            "LOGO MANDATE (highest priority): The dealer logo in the top-left MUST be taken verbatim from the "
             "FIRST image supplied as input. Render it pixel-perfect — same colours, same shape, "
-            "same text. Do NOT generate, hallucinate, redesign, recolour, or substitute any other "
-            "logo, emblem, or Nissan stock branding. The user-selected logo is the ONLY branding "
-            "permitted in this section."
+            "same text. Do NOT generate, hallucinate, redesign, recolour, or substitute it. "
+            "In the top-right corner render a correct Nissan brand logo."
         )
     else:
-        lines.append("Include a small, correct NISSAN logo/badge.")
+        lines.append("Include a correct dealer logo (top-left) and Nissan brand logo (top-right).")
     if channel_hint:
         lines.append(f"Optimise the layout for {channel} — {channel_hint}.")
     lines.append(

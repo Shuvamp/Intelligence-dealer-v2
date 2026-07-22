@@ -32,7 +32,9 @@ router = APIRouter()
 BRAND_SYSTEM_PROMPT = (
     'You are the marketing agent for "Dealer Intelligence OS", a Nissan dealership marketing platform in India (Tamil Nadu). '
     'Brand voice: Nissan — confident, aspirational, friendly. Indian audience; ₹ for prices. '
-    'Vehicles: Magnite (compact SUV), X-Trail (premium SUV), Kicks, Terrano, Sunny. '
+    'Model lineup for reference only (do NOT recite the whole list — name a model ONLY when the '
+    'specific request features it): Tekton (all-new flagship), Magnite (compact SUV), X-Trail (premium SUV), '
+    'Kicks, Terrano, Sunny. '
     'Always return ONLY the requested JSON. No preamble, no markdown.'
 )
 
@@ -128,6 +130,8 @@ class SuggestDescriptionRequest(BaseModel):
     campaign_name: str
     campaign_type: str
     occasion: str = ""
+    vehicles: list[str] = []
+    goal: str = ""
 
 class SuggestDescriptionResponse(BaseModel):
     description: Optional[str] = None
@@ -379,6 +383,8 @@ class BannerRequest(BaseModel):
     image_mime: str = "image/jpeg"
     logo_b64: Optional[str] = None  # user-selected logo, base64 — MUST be used as-is
     logo_mime: str = "image/png"
+    logo2_b64: Optional[str] = None  # optional second logo (e.g. Nissan brand) — top-right
+    logo2_mime: str = "image/png"
     instructions: Optional[str] = None  # extra user art-direction / refine comment
     mode: str = "create"            # "create" | "refine"
     force_regenerate: bool = False  # skip disk cache; always call Gemini
@@ -464,9 +470,13 @@ def poster_banner(req: BannerRequest):
         kind=req.kind, title=req.title, theme=req.theme, headline=req.headline,
         vehicle=req.vehicle, offer=req.offer, channel=req.channel,
         has_car_image=bool(req.image_b64), has_logo=bool(req.logo_b64),
+        has_logo2=bool(req.logo2_b64),
         instructions=req.instructions, mode=req.mode,
     )
-    result = gemini_image(prompt, req.image_b64, req.image_mime, req.logo_b64, req.logo_mime)
+    result = gemini_image(
+        prompt, req.image_b64, req.image_mime,
+        req.logo_b64, req.logo_mime, req.logo2_b64, req.logo2_mime,
+    )
     if not result:
         raise HTTPException(status_code=502, detail="Image generation failed — check Gemini key/quota (see API logs).")
     b64, mime = result
@@ -725,10 +735,13 @@ async def month_plan(month: int, year: int):
 def suggest_campaign_description(req: SuggestDescriptionRequest):
     if not has_llm():
         return SuggestDescriptionResponse(description=None)
+    vehicles = ", ".join(v for v in req.vehicles if v) or "the featured Nissan vehicles"
     data = llm_json(
         (
             f'Write a 2–3 sentence campaign description for a Nissan dealership campaign: "{req.campaign_name}". '
             f'Type: {req.campaign_type}. Occasion: {req.occasion or "general"}. '
+            f'Featured vehicles: {vehicles}. Primary goal: {req.goal or "general awareness"}. '
+            'Mention ONLY the featured vehicles listed above — do NOT invent or name any other Nissan model. '
             'Keep it concise and action-oriented for the marketing team. '
             'Return JSON: {"description": "..."}'
         ),

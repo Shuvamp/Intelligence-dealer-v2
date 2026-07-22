@@ -528,6 +528,7 @@ function ContentStudio() {
          ?? camp?.selected_assets?.find(a => a.file_url)?.file_url ?? null)
       : null
     const logoUrl = camp?.selected_logo?.file_url ?? null
+    const logoUrl2 = camp?.selected_logo_2?.file_url ?? null
     generatePosterImage({
       data: {
         kind: selectedItem.kind,
@@ -541,6 +542,7 @@ function ContentStudio() {
         vehicle: selectedItem.vehicle ?? camp?.vehicles?.[0] ?? 'Nissan',
         asset_url: assetUrl,
         logo_url: logoUrl,
+        logo_url_2: logoUrl2,
       },
     })
       .then(res => {
@@ -659,6 +661,9 @@ function ContentStudio() {
       const campaignLogoUrl = isEvents
         ? (eventLogoAsset?.file_url ?? null)
         : (selectedCampaign?.selected_logo?.file_url ?? null)
+      const campaignLogoUrl2 = isEvents
+        ? null
+        : (selectedCampaign?.selected_logo_2?.file_url ?? null)
       const res = await generatePosterImage({
         data: {
           kind: selectedItem.kind,
@@ -672,6 +677,7 @@ function ContentStudio() {
           vehicle: selectedItem.vehicle ?? vehicle,
           asset_url: campaignAssetUrl,
           logo_url: campaignLogoUrl,
+          logo_url_2: campaignLogoUrl2,
           force_regenerate: true,
         },
       })

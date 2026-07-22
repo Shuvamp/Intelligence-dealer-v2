@@ -14,7 +14,7 @@ from urllib.parse import urlencode
 
 import httpx
 
-from app.config import FACEBOOK_APP_ID, FACEBOOK_CONFIG_ID, FACEBOOK_PAGE_REDIRECT_URI, META_API_VERSION
+from app.config import FACEBOOK_APP_ID, FACEBOOK_PAGE_REDIRECT_URI, META_API_VERSION
 
 logger = logging.getLogger(__name__)
 
@@ -32,17 +32,24 @@ from app.services.instagram import (  # noqa: F401
 
 REQUIRED_PAGE_SCOPES = ("pages_manage_posts", "pages_read_engagement")
 
+# Classic Facebook Login scopes — mirrors Instagram's flow so the user gets the
+# plain Page picker (not the Business asset-sharing dialog the config_id flow
+# shows). pages_show_list is needed to enumerate the user's Pages in the callback.
+SCOPES = ("pages_show_list", *REQUIRED_PAGE_SCOPES)
+
 
 def build_oauth_url(state: str, redirect_uri: str | None = None) -> str:
-    """Facebook Login for Business dialog. Unlike Instagram's build_oauth_url
-    (raw `scope` param), permissions here come from the Meta-side
-    Configuration identified by config_id — nothing to request client-side."""
+    """Classic Facebook Login dialog with a raw `scope` list — same as
+    Instagram's build_oauth_url. Requests Page permissions directly instead of
+    routing through a Meta-side config_id (which renders the business
+    asset-sharing UI)."""
     params = {
         "client_id": FACEBOOK_APP_ID,
         "redirect_uri": redirect_uri or FACEBOOK_PAGE_REDIRECT_URI,
-        "config_id": FACEBOOK_CONFIG_ID,
+        "scope": ",".join(SCOPES),
         "response_type": "code",
         "state": state,
+        "auth_type": "reauthenticate",  # always ask for credentials — enables account switching
     }
     return f"https://www.facebook.com/{META_API_VERSION}/dialog/oauth?{urlencode(params)}"
 

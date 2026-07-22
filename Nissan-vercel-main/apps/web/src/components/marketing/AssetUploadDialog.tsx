@@ -10,7 +10,7 @@ const ASSET_TYPES = [
   { value: 'brand_asset', label: 'Brand Asset' },
 ] as const
 
-const VEHICLES = ['Magnite', 'Patrol', 'X-Trail', 'Sunny', 'Navara', 'Kicks', 'Altima']
+const VEHICLES = ['Tekton', 'Magnite', 'Patrol', 'X-Trail', 'Sunny', 'Navara', 'Kicks']
 
 interface Props {
   open: boolean

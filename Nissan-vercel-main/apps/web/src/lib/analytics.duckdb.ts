@@ -76,6 +76,7 @@ export interface DuckCampaignRow {
   goal?: string | null
   selected_assets?: string | null
   selected_logo?: string | null
+  selected_logo_2?: string | null
 }
 
 // Generated post-content columns shared by campaign_days and opportunities.

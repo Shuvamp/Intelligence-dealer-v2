@@ -665,6 +665,9 @@ export const getCampaigns = createServerFn({ method: 'GET' }).handler(
           const parsedLogo: SelectedAsset | null = r.selected_logo
             ? (() => { try { return JSON.parse(r.selected_logo as string) } catch { return null } })()
             : null
+          const parsedLogo2: SelectedAsset | null = r.selected_logo_2
+            ? (() => { try { return JSON.parse(r.selected_logo_2 as string) } catch { return null } })()
+            : null
           return {
             id: r.campaign_id,
             tenant_id: r.tenant_id,
@@ -685,6 +688,7 @@ export const getCampaigns = createServerFn({ method: 'GET' }).handler(
             publishedCount: byId.filter((p) => p.campaign_id === r.campaign_id && p.status === 'published').length,
             selected_assets: parsedAssets,
             selected_logo: parsedLogo,
+            selected_logo_2: parsedLogo2,
             vehicles: parsedAssets.length > 0
               ? [...new Set(parsedAssets.map((a) => a.vehicle))]
               : (r.vehicle ? (r.vehicle as string).split(',').filter(Boolean) : []),
@@ -723,6 +727,9 @@ export const getDuckCampaigns = createServerFn({ method: 'GET' }).handler(
         const parsedLogo: SelectedAsset | null = r.selected_logo
           ? (() => { try { return JSON.parse(r.selected_logo as string) } catch { return null } })()
           : null
+        const parsedLogo2: SelectedAsset | null = r.selected_logo_2
+          ? (() => { try { return JSON.parse(r.selected_logo_2 as string) } catch { return null } })()
+          : null
         return {
           id: r.campaign_id,
           tenant_id: r.tenant_id,
@@ -743,6 +750,7 @@ export const getDuckCampaigns = createServerFn({ method: 'GET' }).handler(
           publishedCount: r.published_count,
           selected_assets: parsedAssets,
           selected_logo: parsedLogo,
+          selected_logo_2: parsedLogo2,
           vehicles: parsedAssets.length > 0
             ? [...new Set(parsedAssets.map((a) => a.vehicle))]
             : (r.vehicle ? (r.vehicle as string).split(',').filter(Boolean) : []),
@@ -1153,6 +1161,25 @@ export const deleteAsset = createServerFn({ method: 'POST' })
       .eq('id', data.assetId)
       .eq('tenant_id', tenantId)
     if (error) throw new Error(`Failed to delete asset: ${error.message}`)
+    return { ok: true }
+  })
+
+// Toggle whether an asset is picked for the campaign planner. Tenant-shared,
+// durable. campaign_selected_at stamps pick order (first logo → poster top-left).
+export const setAssetCampaignSelected = createServerFn({ method: 'POST' })
+  .validator((d: { assetId: string; selected: boolean }) => d)
+  .handler(async ({ data }): Promise<{ ok: true }> => {
+    const supabase = getSupabaseServerClient()
+    const { tenantId } = await authCtx(supabase)
+    const { error } = await supabase
+      .from('marketing_assets')
+      .update({
+        campaign_selected: data.selected,
+        campaign_selected_at: data.selected ? new Date().toISOString() : null,
+      })
+      .eq('id', data.assetId)
+      .eq('tenant_id', tenantId)
+    if (error) throw new Error(`Failed to update selection: ${error.message}`)
     return { ok: true }
   })
 
@@ -1642,6 +1669,7 @@ export const generateCampaignPlan = createServerFn({ method: 'POST' })
       campaign_color: data.campaign_color ?? null,
       selected_assets: data.selected_assets ?? [],
       selected_logo: data.selected_logo ?? null,
+      selected_logo_2: data.selected_logo_2 ?? null,
       days: json.days.map((d) => ({
         date: d.date,
         day_num: d.day_num,
@@ -1685,6 +1713,9 @@ export const createCampaignFromPlan = createServerFn({ method: 'POST' })
           : null,
         selected_logo: data.selected_logo
           ? JSON.stringify(data.selected_logo)
+          : null,
+        selected_logo_2: data.selected_logo_2
+          ? JSON.stringify(data.selected_logo_2)
           : null,
       })
       if (data.days.length > 0) {
@@ -2038,6 +2069,7 @@ export const generatePosterImage = createServerFn({ method: 'POST' })
     title?: string; theme: string; headline: string
     vehicle?: string; asset_url?: string | null
     logo_url?: string | null         // user-selected logo — passed as-is to Gemini
+    logo_url_2?: string | null       // optional second logo (Nissan brand) — top-right
     instructions?: string            // extra user art-direction / refine comment
     mode?: 'create' | 'refine'
     base_poster_url?: string | null  // existing poster to edit when mode='refine'
@@ -2052,6 +2084,8 @@ export const generatePosterImage = createServerFn({ method: 'POST' })
     let imageMime = 'image/jpeg'
     let logoB64: string | null = null
     let logoMime = 'image/png'
+    let logo2B64: string | null = null
+    let logo2Mime = 'image/png'
 
     if (mode === 'refine' && data.base_poster_url) {
       // Refine: the input image is the EXISTING poster (served by FastAPI).
@@ -2103,6 +2137,21 @@ export const generatePosterImage = createServerFn({ method: 'POST' })
           console.warn('[generatePosterImage] logo fetch failed, generating without logo:', e)
         }
       }
+
+      // Optional second logo (e.g. Nissan brand mark) — rendered top-right.
+      const logoUrl2 = data.logo_url_2 ?? null
+      if (logoUrl2) {
+        try {
+          const logo2Res = await fetch(logoUrl2)
+          if (logo2Res.ok) {
+            logo2B64 = Buffer.from(await logo2Res.arrayBuffer()).toString('base64')
+            logo2Mime = logoUrl2.toLowerCase().endsWith('.jpg') || logoUrl2.toLowerCase().endsWith('.jpeg')
+              ? 'image/jpeg' : 'image/png'
+          }
+        } catch (e) {
+          console.warn('[generatePosterImage] second logo fetch failed, generating without it:', e)
+        }
+      }
     }
 
     // FastAPI generates + SAVES the poster under a structured backend folder.
@@ -2119,6 +2168,8 @@ export const generatePosterImage = createServerFn({ method: 'POST' })
         image_mime: imageMime,
         logo_b64: logoB64,
         logo_mime: logoMime,
+        logo2_b64: logo2B64,
+        logo2_mime: logo2Mime,
         instructions: data.instructions ?? null,
         mode,
         force_regenerate: data.force_regenerate ?? false,
@@ -2344,7 +2395,7 @@ export const queryCampaignAnalytics = createServerFn({ method: 'GET' })
 // ── Campaign wizard AI-suggest helpers (FastAPI / NVIDIA NIM) ────────────────
 
 export const suggestCampaignDescription = createServerFn({ method: 'POST' })
-  .validator((d: { campaign_name: string; campaign_type: string; occasion?: string }) => d)
+  .validator((d: { campaign_name: string; campaign_type: string; occasion?: string; vehicles?: string[]; goal?: string }) => d)
   .handler(async ({ data }): Promise<string | null> => {
     try {
       const res = await fetch(`${FASTAPI_URL}/marketing/campaign/suggest-description`, {
@@ -2354,6 +2405,8 @@ export const suggestCampaignDescription = createServerFn({ method: 'POST' })
           campaign_name: data.campaign_name,
           campaign_type: data.campaign_type,
           occasion: data.occasion ?? '',
+          vehicles: data.vehicles ?? [],
+          goal: data.goal ?? '',
         }),
       })
       if (!res.ok) return null

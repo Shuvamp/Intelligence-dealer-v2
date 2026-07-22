@@ -22,21 +22,27 @@ def gemini_image(
     image_mime: str = "image/jpeg",
     logo_b64: str | None = None,
     logo_mime: str = "image/png",
+    logo2_b64: str | None = None,
+    logo2_mime: str = "image/png",
 ) -> tuple[str, str] | None:
     """Generate (or edit) an image via Gemini 3 image models.
 
     With image_b64, the car photo is passed as an inline part. With logo_b64,
     the user-selected logo is prepended as the FIRST image part so the model
-    renders it exactly. Returns (b64, mime) of the first image part.
-    Tries GEMINI_IMAGE_MODEL, then gemini-3.1-flash-image. None if all fail.
+    renders it exactly; logo2_b64 (if given) follows as the SECOND image part
+    (e.g. dealer logo + Nissan brand logo). Returns (b64, mime) of the first
+    image part. Tries GEMINI_IMAGE_MODEL, then gemini-3.1-flash-image. None if all fail.
     """
     if not GEMINI_API_KEY:
         return None
 
     parts: list[dict] = []
-    # Logo MUST come first so the prompt can reference it as "the first image".
+    # Logos MUST come first, in order, so the prompt can reference them as the
+    # "first" (dealer) and "second" (Nissan) input images.
     if logo_b64:
         parts.append({"inlineData": {"mimeType": logo_mime, "data": logo_b64}})
+    if logo2_b64:
+        parts.append({"inlineData": {"mimeType": logo2_mime, "data": logo2_b64}})
     if image_b64:
         parts.append({"inlineData": {"mimeType": image_mime, "data": image_b64}})
     parts.append({"text": prompt})
