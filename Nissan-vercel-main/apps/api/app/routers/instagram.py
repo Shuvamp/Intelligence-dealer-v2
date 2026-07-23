@@ -10,6 +10,7 @@ from pydantic import BaseModel
 from app.config import FRONTEND_URL
 from app.services import channel_store, instagram_analytics_store as analytics_store
 from app.services.instagram import (
+    InstagramCommentError,
     build_oauth_url,
     consume_oauth_state,
     create_oauth_state,
@@ -20,6 +21,7 @@ from app.services.instagram import (
     get_long_lived_token,
     get_media_comments,
     get_token_debug_info,
+    reply_to_comment,
 )
 
 logger = logging.getLogger(__name__)
@@ -297,6 +299,26 @@ async def instagram_insights(
 
     latest_metrics = await analytics_store.get_latest_post_metrics(tenant_id)
 
+    # Campaign attribution by publish-date window — same rule as the SQL in
+    # refresh_campaign_insights_from_instagram (0053/0055): a post falls under
+    # whichever campaign's [start_date, end_date] range contains its publish
+    # date. Sorted latest-start-first so the first window match wins on overlap.
+    campaigns = await analytics_store.get_campaigns_for_tenant(tenant_id)
+    campaigns.sort(key=lambda c: c.get("start_date") or "", reverse=True)
+    today = datetime.now(timezone.utc).date().isoformat()
+
+    def campaign_for(published_at: str | None) -> str | None:
+        if not published_at:
+            return None
+        day = published_at[:10]
+        for c in campaigns:
+            start = c.get("start_date")
+            if not start or day < start:
+                continue
+            if day <= (c.get("end_date") or today):
+                return c.get("name")
+        return None
+
     per: list[dict] = []
     likes = comments = 0
     # "ok" (likes available on at least one post) wins over any degraded
@@ -310,6 +332,11 @@ async def instagram_insights(
         comments += m.get("comments") or 0
         if likes_status != "ok" and m.get("status"):
             likes_status = m["status"]
+        reach = m.get("reach")
+        engagement_rate = (
+            round(((m.get("likes") or 0) + (m.get("comments") or 0) + (m.get("shares") or 0) + (m.get("saved") or 0)) / reach * 100, 1)
+            if reach else None
+        )
         per.append({
             "mediaId": p["media_id"],
             "caption": p.get("caption"),
@@ -319,6 +346,12 @@ async def instagram_insights(
             "at": p.get("published_at"),
             "likes": m.get("likes"),
             "comments": m.get("comments"),
+            "reach": reach,
+            "impressions": m.get("impressions"),
+            "shares": m.get("shares"),
+            "saved": m.get("saved"),
+            "engagementRate": engagement_rate,
+            "campaign": campaign_for(p.get("published_at")),
             "status": m.get("status"),
         })
 
@@ -356,6 +389,35 @@ async def instagram_comments(tenant_id: str = Query(...), media_id: str = Query(
         raise HTTPException(status_code=400, detail="Instagram is not connected")
     comments = await get_media_comments(media_id, row["access_token"])
     return {"media_id": media_id, "comments": comments}
+
+
+class ReplyToCommentRequest(BaseModel):
+    tenant_id: str
+    comment_id: str
+    message: str
+
+
+@router.post("/comments/reply")
+async def instagram_reply_to_comment(req: ReplyToCommentRequest):
+    """Reply to one Instagram comment from the dashboard's Comments panel —
+    posts through the Graph API so it shows up on the live Instagram post
+    too. No local reply storage: the next GET /comments call re-reads
+    Instagram's own state, so app and Instagram never diverge."""
+    if not req.message.strip():
+        raise HTTPException(status_code=400, detail="Reply message is required")
+    row = await channel_store.get(req.tenant_id, "instagram")
+    if not row or row.get("status") != "connected" or not row.get("access_token"):
+        raise HTTPException(status_code=400, detail="Instagram is not connected")
+    try:
+        result = await reply_to_comment(req.comment_id, row["access_token"], req.message.strip())
+    except InstagramCommentError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+    return {
+        "id": result.get("id"),
+        "text": req.message.strip(),
+        "username": row.get("handle"),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
 
 
 class RefreshAnalyticsRequest(BaseModel):

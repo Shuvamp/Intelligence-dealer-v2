@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import {
   Linkedin, Instagram, ThumbsUp, MessageCircle, Activity, BarChart3, Share2, Users, Eye,
   Megaphone, Percent, Plug, CheckCircle2, XCircle, Clock, Trophy, Info, MousePointerClick,
@@ -6,6 +7,7 @@ import { Link } from '@tanstack/react-router'
 import type { ChannelConnection } from '#/lib/types'
 import type { LinkedInInsights, LinkedInPostInsight, InstagramInsights, InstagramPostInsight, AnalyticsChannelCampaign } from '#/lib/marketing'
 import { CHANNELS } from './ChannelFilter'
+import { InstagramMetricDialog } from './MetricDetailDialog'
 
 const fmt = (n: number) => n.toLocaleString('en-IN')
 
@@ -66,10 +68,16 @@ export function ConnectedChannelsCard({ connections }: { connections: Array<Chan
 
 // ── Small metric tile (real value, or "Analytics unavailable") ───────────────
 function Metric({
-  label, value, icon, color, suffix, tracked = true,
-}: { label: string; value?: string; icon: React.ReactNode; color: string; suffix?: string; tracked?: boolean }) {
+  label, value, icon, color, suffix, tracked = true, onClick,
+}: { label: string; value?: string; icon: React.ReactNode; color: string; suffix?: string; tracked?: boolean; onClick?: () => void }) {
+  const clickable = tracked && !!onClick
   return (
-    <div className={`group rounded-[16px] border bg-white p-4 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_8px_24px_-8px_rgba(16,24,40,0.14)] ${tracked ? 'border-[#EDEFF2]' : 'border-dashed border-[#E5E7EB]'}`}>
+    <div
+      onClick={clickable ? onClick : undefined}
+      role={clickable ? 'button' : undefined}
+      tabIndex={clickable ? 0 : undefined}
+      onKeyDown={clickable ? (e) => { if (e.key === 'Enter' || e.key === ' ') onClick!() } : undefined}
+      className={`group rounded-[16px] border bg-white p-4 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_8px_24px_-8px_rgba(16,24,40,0.14)] ${tracked ? 'border-[#EDEFF2]' : 'border-dashed border-[#E5E7EB]'} ${clickable ? 'cursor-pointer' : ''}`}>
       <span
         className="flex h-9 w-9 items-center justify-center rounded-[11px] transition-transform duration-200 group-hover:scale-105"
         style={{ background: tracked ? `${color}14` : '#F3F4F6', color: tracked ? color : '#D1D5DB' }}
@@ -210,6 +218,7 @@ export function InstagramInsightsPanel({ data, showTopPosts = true }: { data: In
     )
   }
   const likesOk = data.likesMetricsStatus === 'ok'
+  const [drilldown, setDrilldown] = useState<'likes' | 'comments' | null>(null)
 
   return (
     <div className="space-y-4">
@@ -224,8 +233,8 @@ export function InstagramInsightsPanel({ data, showTopPosts = true }: { data: In
           </span>
         </div>
         <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-          <Metric label="Likes" value={likesOk ? fmt(data.likes) : undefined} icon={<ThumbsUp className="h-4 w-4" />} color="#E1306C" tracked={likesOk} />
-          <Metric label="Comments" value={fmt(data.comments)} icon={<MessageCircle className="h-4 w-4" />} color="#8B5CF6" />
+          <Metric label="Likes" value={likesOk ? fmt(data.likes) : undefined} icon={<ThumbsUp className="h-4 w-4" />} color="#E1306C" tracked={likesOk} onClick={() => setDrilldown('likes')} />
+          <Metric label="Comments" value={fmt(data.comments)} icon={<MessageCircle className="h-4 w-4" />} color="#8B5CF6" onClick={() => setDrilldown('comments')} />
           <Metric label="Engagement" value={fmt(data.engagement)} icon={<Activity className="h-4 w-4" />} color="#22C55E" />
           <Metric label="Avg / Post" value={String(data.avgEngagementPerPost)} icon={<BarChart3 className="h-4 w-4" />} color="#F59E0B" />
         </div>
@@ -235,6 +244,14 @@ export function InstagramInsightsPanel({ data, showTopPosts = true }: { data: In
           </p>
         )}
       </div>
+
+      <InstagramMetricDialog
+        open={drilldown !== null}
+        onOpenChange={(open) => !open && setDrilldown(null)}
+        metric={drilldown ?? 'likes'}
+        posts={data.posts}
+        total={drilldown === 'comments' ? data.comments : data.likes}
+      />
 
       {showTopPosts && (
         <div className="rounded-[18px] border border-[#E5E7EB] bg-white p-5">

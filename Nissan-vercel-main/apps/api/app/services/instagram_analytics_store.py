@@ -111,6 +111,8 @@ async def insert_post_metrics(
     error_message: str | None = None,
     reach: int | None = None,
     impressions: int | None = None,
+    saved: int | None = None,
+    shares: int | None = None,
 ) -> None:
     row = {
         "id": str(uuid.uuid4()),
@@ -120,6 +122,8 @@ async def insert_post_metrics(
         "comments": comments,
         "reach": reach,
         "impressions": impressions,
+        "saved": saved,
+        "shares": shares,
         "status": status,
         "error_message": (error_message or "")[:500] or None,
         "captured_at": _now(),
@@ -175,6 +179,27 @@ async def get_account_metrics(tenant_id: str, limit: int = 1000) -> list[dict]:
             return r.json()
     except Exception:  # noqa: BLE001
         logger.exception("[instagram:analytics] get_account_metrics failed tenant=%s", tenant_id)
+        return []
+
+
+async def get_campaigns_for_tenant(tenant_id: str) -> list[dict]:
+    """Campaign id/name/date-range, for attributing a post to a campaign by
+    publish-date window — same rule as the SQL in
+    refresh_campaign_insights_from_instagram (0053/0055_campaign_insights_*.sql),
+    reused here so the Post Performance table can show it per-post without a
+    media_id/campaign_id FK (organic posts never carry one)."""
+    try:
+        async with httpx.AsyncClient(base_url=SUPABASE_URL, timeout=15) as c:
+            r = await c.get(
+                "/rest/v1/campaigns",
+                params={"tenant_id": f"eq.{tenant_id}", "start_date": "not.is.null",
+                        "select": "id,name,start_date,end_date"},
+                headers=_headers(),
+            )
+            r.raise_for_status()
+            return r.json()
+    except Exception:  # noqa: BLE001
+        logger.exception("[instagram:analytics] get_campaigns_for_tenant failed tenant=%s", tenant_id)
         return []
 
 

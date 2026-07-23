@@ -1,6 +1,8 @@
 import type { ComponentType } from 'react'
+import { useState } from 'react'
 import { ArrowDownRight, ArrowUpRight, Eye, Heart, Layers, Megaphone, MessageCircle, Minus, MousePointerClick, Share2, UserPlus } from 'lucide-react'
 import type { AnalyticsKpis, InstagramInsights } from '#/lib/marketing'
+import { InstagramMetricDialog } from '#/components/marketing/analytics/MetricDetailDialog'
 import { DashCard, compact } from './shared'
 
 // null = "no previous-period baseline" (prev was 0 or absent) → render as N/A,
@@ -30,11 +32,18 @@ interface Kpi {
   // Per-KPI icon tile — [background, foreground]. Tailwind's scanner needs
   // literal class strings, so these are written out rather than interpolated.
   tile: string
+  // Present only for metrics with a per-post breakdown to drill into (Likes, Comments).
+  metricKey?: 'likes' | 'comments'
 }
 
-function KpiCard({ icon: Icon, label, value, pct, tracked, tile, delay }: Kpi & { delay: number }) {
+function KpiCard({ icon: Icon, label, value, pct, tracked, tile, delay, metricKey, onDrilldown }: Kpi & { delay: number; onDrilldown?: (key: 'likes' | 'comments') => void }) {
+  const clickable = tracked && value !== null && !!metricKey
   return (
-    <DashCard delay={delay} className="!p-4">
+    <DashCard
+      delay={delay}
+      className={`!p-4 ${clickable ? 'cursor-pointer' : ''}`}
+      onClick={clickable ? () => onDrilldown?.(metricKey!) : undefined}
+    >
       <div className="flex items-center gap-2.5">
         <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] ${tile}`}>
           <Icon className="h-[18px] w-[18px]" />
@@ -63,11 +72,12 @@ export function KpiRow({
   // Sum of the real day-over-day follower deltas in range — tracked only once
   // the poller has ≥2 snapshots to diff (see AudienceGrowthChart).
   const gained = instagram?.audience.reduce<number | null>((t, p) => (p.net === null ? t : (t ?? 0) + p.net), null) ?? null
+  const [drilldown, setDrilldown] = useState<'likes' | 'comments' | null>(null)
   const items: Array<Kpi> = [
-    { icon: Eye, label: 'Total Reach', value: kpis.reach, pct: pctDelta(kpis.reach, prevKpis.reach), tracked: true, tile: 'bg-[#EEF2FF] text-[#4F46E5]' },
-    { icon: Layers, label: 'Impressions', value: kpis.impressions, pct: pctDelta(kpis.impressions, prevKpis.impressions), tracked: true, tile: 'bg-[#EFF6FF] text-[#2563EB]' },
-    { icon: Heart, label: 'Likes', value: instagram?.likes ?? null, pct: instagram && prevInstagram ? pctDelta(instagram.likes, prevInstagram.likes) : null, tracked: !!instagram, tile: 'bg-[#FDF2F8] text-[#DB2777]' },
-    { icon: MessageCircle, label: 'Comments', value: instagram?.comments ?? null, pct: instagram && prevInstagram ? pctDelta(instagram.comments, prevInstagram.comments) : null, tracked: !!instagram, tile: 'bg-[#FFF7ED] text-[#EA580C]' },
+    { icon: Eye, label: 'Total Reach', value: kpis.reach, pct: pctDelta(kpis.reach, prevKpis.reach), tracked: true, tile: 'bg-[#F9FAFB] text-[#6B7280]' },
+    { icon: Layers, label: 'Impressions', value: kpis.impressions, pct: pctDelta(kpis.impressions, prevKpis.impressions), tracked: true, tile: 'bg-[#F9FAFB] text-[#6B7280]' },
+    { icon: Heart, label: 'Likes', value: instagram?.likes ?? null, pct: instagram && prevInstagram ? pctDelta(instagram.likes, prevInstagram.likes) : null, tracked: !!instagram, tile: 'bg-[#FDF2F8] text-[#DB2777]', metricKey: 'likes' },
+    { icon: MessageCircle, label: 'Comments', value: instagram?.comments ?? null, pct: instagram && prevInstagram ? pctDelta(instagram.comments, prevInstagram.comments) : null, tracked: !!instagram, tile: 'bg-[#FFF7ED] text-[#EA580C]', metricKey: 'comments' },
     { icon: Share2, label: 'Shares', value: null, pct: null, tracked: false, tile: 'bg-[#ECFDF5] text-[#059669]' },
     { icon: Megaphone, label: 'Saves', value: null, pct: null, tracked: false, tile: 'bg-[#FEFCE8] text-[#CA8A04]' },
     { icon: UserPlus, label: 'Followers Gained', value: gained, pct: null, tracked: gained !== null, tile: 'bg-[#F5F3FF] text-[#7C3AED]' },
@@ -75,7 +85,14 @@ export function KpiRow({
   ]
   return (
     <div className="grid grid-cols-2 gap-4 sm:grid-cols-4 xl:grid-cols-8">
-      {items.map((item, i) => <KpiCard key={item.label} {...item} delay={i * 0.03} />)}
+      {items.map((item, i) => <KpiCard key={item.label} {...item} delay={i * 0.03} onDrilldown={setDrilldown} />)}
+      <InstagramMetricDialog
+        open={drilldown !== null}
+        onOpenChange={(open) => !open && setDrilldown(null)}
+        metric={drilldown ?? 'likes'}
+        posts={instagram?.posts ?? []}
+        total={drilldown === 'comments' ? instagram?.comments ?? 0 : instagram?.likes ?? 0}
+      />
     </div>
   )
 }

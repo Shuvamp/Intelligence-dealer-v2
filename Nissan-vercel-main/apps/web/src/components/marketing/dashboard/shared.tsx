@@ -29,16 +29,22 @@ export function DashCard({
   className = '',
   glass = false,
   delay = 0,
+  onClick,
   children,
 }: {
   className?: string
   glass?: boolean
   delay?: number
+  onClick?: () => void
   children: ReactNode
 }) {
   return (
     <motion.div
       {...fadeUp(delay)}
+      onClick={onClick}
+      role={onClick ? 'button' : undefined}
+      tabIndex={onClick ? 0 : undefined}
+      onKeyDown={onClick ? (e) => { if (e.key === 'Enter' || e.key === ' ') onClick() } : undefined}
       className={`rounded-[16px] border border-[#ECECEF] p-5 shadow-[0_1px_2px_rgba(16,24,40,0.04),0_8px_24px_-8px_rgba(16,24,40,0.08)] transition-shadow duration-200 hover:shadow-[0_2px_4px_rgba(16,24,40,0.06),0_16px_32px_-8px_rgba(16,24,40,0.12)] ${
         glass ? 'bg-white/70 backdrop-blur-md' : 'bg-white'
       } ${className}`}

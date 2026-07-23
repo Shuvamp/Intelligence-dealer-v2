@@ -56,13 +56,15 @@ async def _refresh_post(tenant_id: str, token: str, post: dict) -> None:
     media_id = post["media_id"]
     stats = await ig.get_media_stats(media_id, token)
     status = stats["status"] if stats["status"] != "ok" else stats["likes_status"]
-    # reach/impressions come from a separate endpoint (instagram_manage_insights);
-    # it failing must not lose the like/comment counts we already have.
+    # reach/impressions/saved/shares come from a separate endpoint
+    # (instagram_manage_insights); it failing must not lose the like/comment
+    # counts we already have.
     insights = await ig.get_media_insights(media_id, token)
     await store.insert_post_metrics(
         tenant_id, media_id, status,
         likes=stats["likes"], comments=stats["comments"],
         reach=insights["reach"], impressions=insights["impressions"],
+        saved=insights["saved"], shares=insights["shares"],
     )
 
 

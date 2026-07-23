@@ -593,6 +593,12 @@ export interface InstagramPostInsight {
   at: string | null
   likes: number | null
   comments: number | null
+  reach: number | null
+  impressions: number | null
+  shares: number | null
+  saved: number | null
+  engagementRate: number | null
+  campaign: string | null
   status: InstagramMetricsStatus
 }
 
@@ -648,6 +654,56 @@ export const getInstagramInsights = createServerFn({ method: 'GET' })
       console.error('[getInstagramInsights] failed:', e)
       return empty
     }
+  })
+
+export interface InstagramComment {
+  id: string
+  text: string
+  username: string
+  timestamp: string
+  replies?: Array<InstagramComment>
+}
+
+// On-demand comment text for one post (commenter, text, date/time, nested
+// replies) — not batched into getInstagramInsights, fetched only when a user
+// opens a post's comment breakdown, to avoid an N+1 Graph API call per post
+// on every load. Always Instagram's current state, so replies posted from
+// the app OR from Instagram itself both show up here.
+export const getInstagramComments = createServerFn({ method: 'GET' })
+  .validator((d: { mediaId: string }) => d)
+  .handler(async ({ data }): Promise<Array<InstagramComment>> => {
+    try {
+      const supabase = getSupabaseServerClient()
+      const { tenantId } = await authCtx(supabase)
+      const qs = new URLSearchParams({ tenant_id: tenantId, media_id: data.mediaId })
+      const res = await fetch(`${FASTAPI_URL}/api/instagram/comments?${qs.toString()}`)
+      if (!res.ok) return []
+      const body = (await res.json()) as { comments: Array<InstagramComment> }
+      return body.comments ?? []
+    } catch (e) {
+      console.error('[getInstagramComments] failed:', e)
+      return []
+    }
+  })
+
+// Reply to one Instagram comment — posts through the Graph API (Meta Business
+// Suite-style), so it lands on the live Instagram post immediately, not just
+// in this app. Throws on failure so the UI can show the reply didn't send.
+export const replyToInstagramComment = createServerFn({ method: 'POST' })
+  .validator((d: { commentId: string; message: string }) => d)
+  .handler(async ({ data }): Promise<InstagramComment> => {
+    const supabase = getSupabaseServerClient()
+    const { tenantId } = await authCtx(supabase)
+    const res = await fetch(`${FASTAPI_URL}/api/instagram/comments/reply`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tenant_id: tenantId, comment_id: data.commentId, message: data.message }),
+    })
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({})) as { detail?: string }
+      throw new Error(body.detail ?? `Reply failed: ${res.status}`)
+    }
+    return (await res.json()) as InstagramComment
   })
 
 export const getLinkedInOrganizations = createServerFn({ method: 'GET' }).handler(

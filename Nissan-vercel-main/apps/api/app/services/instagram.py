@@ -26,6 +26,10 @@ SCOPES = [
     # without App Review; going live needs Advanced Access for this permission.
     # Tokens issued before this line was added lack it — reconnect Instagram.
     "instagram_manage_insights",
+    # Required to read AND reply to comments (/{media-id}/comments,
+    # /{comment-id}/replies). Tokens issued before this line lack it —
+    # reconnect Instagram.
+    "instagram_manage_comments",
 ]
 
 # ── CSRF state store ──────────────────────────────────────────────────────────
@@ -283,7 +287,7 @@ async def get_media_stats(media_id: str, access_token: str) -> dict:
 
 
 async def get_media_insights(media_id: str, access_token: str) -> dict:
-    """GET /{media-id}/insights — per-post reach + impressions.
+    """GET /{media-id}/insights — per-post reach + impressions + saved + shares.
 
     Needs instagram_manage_insights. Metric names moved: `impressions` was
     dropped for media in Graph v22 and replaced by `views`, so this asks for
@@ -291,6 +295,10 @@ async def get_media_insights(media_id: str, access_token: str) -> dict:
     tenants pinned to an older META_API_VERSION, then to `reach` alone (some
     media types report nothing else). Whichever answers, `views`/`impressions`
     lands in the same impressions slot.
+
+    `saved`/`shares` are fetched separately — not every media type supports
+    both (older API versions/reels don't report `shares`), so a rejected
+    combined request falls back to `saved` alone rather than losing both.
 
     Anything still missing comes back as None -> stored as NULL, never 0: a
     zero here would read as "nobody saw this post", a different claim from
@@ -317,36 +325,77 @@ async def get_media_insights(media_id: str, access_token: str) -> dict:
         body = (await _fetch("reach,views")
                 or await _fetch("reach,impressions")
                 or await _fetch("reach"))
-        if body is None:
-            return {"reach": None, "impressions": None, "status": "unavailable"}
-        return {
-            "reach": body.get("reach"),
-            "impressions": body.get("views") if body.get("views") is not None else body.get("impressions"),
-            "status": "ok",
-        }
+        reach = body.get("reach") if body else None
+        impressions = (body.get("views") if body.get("views") is not None else body.get("impressions")) if body else None
+        status = "ok" if body else "unavailable"
     except Exception:  # noqa: BLE001
         logger.exception("[instagram:analytics] get_media_insights crashed media_id=%s", media_id)
-        return {"reach": None, "impressions": None, "status": "error"}
+        reach = impressions = None
+        status = "error"
+
+    try:
+        extra = await _fetch("saved,shares") or await _fetch("saved")
+        saved = extra.get("saved") if extra else None
+        shares = extra.get("shares") if extra else None
+    except Exception:  # noqa: BLE001
+        logger.exception("[instagram:analytics] get_media_insights saved/shares crashed media_id=%s", media_id)
+        saved = shares = None
+
+    return {"reach": reach, "impressions": impressions, "saved": saved, "shares": shares, "status": status}
 
 
 async def get_media_comments(media_id: str, access_token: str, limit: int = 25) -> list[dict]:
-    """GET /{media-id}/comments — top-level comments, newest first. Returns
-    [] on any failure (best-effort, never raises)."""
+    """GET /{media-id}/comments — top-level comments, newest first, each with
+    its nested replies edge expanded. This is what keeps the dashboard's
+    comment thread in sync with Instagram: replies posted from the app (or
+    from Instagram itself, by anyone) all land in the same underlying comment
+    thread, so the next fetch here reflects both. Returns [] on any failure
+    (best-effort, never raises)."""
     try:
         async with httpx.AsyncClient() as client:
             r = await client.get(
                 f"https://graph.facebook.com/{META_API_VERSION}/{media_id}/comments",
-                params={"access_token": access_token, "fields": "id,text,username,timestamp", "limit": limit},
+                params={
+                    "access_token": access_token,
+                    "fields": "id,text,username,timestamp,replies{id,text,username,timestamp}",
+                    "limit": limit,
+                },
                 timeout=15,
             )
         if not r.is_success:
             logger.warning("[instagram:analytics] get_media_comments failed media_id=%s status=%d body=%s",
                            media_id, r.status_code, r.text)
             return []
-        return r.json().get("data", [])
+        data = r.json().get("data", [])
+        for c in data:
+            c["replies"] = (c.get("replies") or {}).get("data", [])
+        return data
     except Exception:  # noqa: BLE001
         logger.exception("[instagram:analytics] get_media_comments crashed media_id=%s", media_id)
         return []
+
+
+class InstagramCommentError(Exception):
+    """Raised when posting a reply to Instagram fails — unlike the
+    best-effort GETs above, the caller must know a reply did NOT go out."""
+
+
+async def reply_to_comment(comment_id: str, access_token: str, message: str) -> dict:
+    """POST /{ig-comment-id}/replies — publishes a reply on the live
+    Instagram post immediately; no separate sync step exists or is needed,
+    since get_media_comments always re-reads Instagram's own current state."""
+    async with httpx.AsyncClient() as client:
+        r = await client.post(
+            f"https://graph.facebook.com/{META_API_VERSION}/{comment_id}/replies",
+            params={"access_token": access_token, "message": message},
+            timeout=15,
+        )
+    if not r.is_success:
+        detail = r.json().get("error", {}).get("message") if r.text else str(r.status_code)
+        logger.warning("[instagram:comments] reply_to_comment failed comment_id=%s status=%d body=%s",
+                        comment_id, r.status_code, r.text)
+        raise InstagramCommentError(detail or f"Instagram reply failed ({r.status_code})")
+    return r.json()
 
 
 # ── Publishing ─────────────────────────────────────────────────────────────

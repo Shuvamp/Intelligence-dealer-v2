@@ -6,8 +6,9 @@ import { DashCard, EmptyState, SectionHeader, compact } from './shared'
 
 const NA = <span className="text-[#C4C4C4]">—</span>
 
-// Real likes/comments per post; reach/shares/engagement-rate per post aren't
-// tracked anywhere in the schema, shown as "—" not 0.
+// Likes/comments/reach/engagement-rate per post are all real (Instagram
+// Graph API media insights); "—" means Instagram didn't report that metric
+// for this post/media-type, never a fabricated 0.
 export function TopPerformingPosts({ posts }: { posts: Array<InstagramPostInsight> }) {
   return (
     <DashCard className="flex h-full flex-col">
@@ -35,10 +36,10 @@ export function TopPerformingPosts({ posts }: { posts: Array<InstagramPostInsigh
                 <p className="truncate text-[12px] font-medium text-[#1A1A1A]">{p.caption || 'Untitled post'}</p>
                 <p className="text-[10px] text-[#9CA3AF]">{p.at ? p.at.substring(0, 10) : '—'}</p>
                 <div className="mt-1 flex gap-3 text-[10px] text-[#6B7280]">
-                  <span>Reach {NA}</span>
+                  <span>Reach <b className="font-semibold text-[#1A1A1A]">{p.reach != null ? compact(p.reach) : '—'}</b></span>
                   <span>Likes <b className="font-semibold text-[#1A1A1A]">{p.likes ?? '—'}</b></span>
                   <span>Comments <b className="font-semibold text-[#1A1A1A]">{p.comments ?? '—'}</b></span>
-                  <span>Eng. rate {NA}</span>
+                  <span>Eng. rate <b className="font-semibold text-[#1A1A1A]">{p.engagementRate != null ? `${p.engagementRate}%` : '—'}</b></span>
                 </div>
               </div>
             </div>
@@ -95,9 +96,10 @@ export function CampaignPerformanceTable({ leaderboard, campaigns }: {
 
 const PAGE_SIZES = [10, 25, 50]
 
-// Full-width paginated post table. Date/Likes/Comments real; Campaign is null
-// for organic IG posts (no campaign_id on instagram_posts); Reach/Impressions/
-// Shares/Saves/Engagement-rate per post aren't tracked anywhere.
+// Full-width paginated post table — Date/Post/Campaign/Reach/Impressions/
+// Likes/Comments/Shares/Saves/Engagement-rate all real, from the Instagram
+// Graph API media insights endpoint. Campaign is attributed by publish-date
+// window (organic posts outside any campaign's date range show "—").
 export function PostPerformanceTable({ posts }: { posts: Array<InstagramPostInsight> }) {
   const [pageSize, setPageSize] = useState(10)
   const [page, setPage] = useState(0)
@@ -126,14 +128,14 @@ export function PostPerformanceTable({ posts }: { posts: Array<InstagramPostInsi
                   <tr key={p.mediaId} className="border-t border-[#F3F4F6] transition-colors hover:bg-[#FAFAFA]">
                     <td className="whitespace-nowrap py-2.5 text-[#4B5563]">{p.at ? p.at.substring(0, 10) : NA}</td>
                     <td className="max-w-[220px] truncate py-2.5 font-medium text-[#1A1A1A]">{p.caption || 'Untitled post'}</td>
-                    <td className="py-2.5 text-[#9CA3AF]">{NA}</td>
-                    <td className="py-2.5 text-[#9CA3AF]">{NA}</td>
-                    <td className="py-2.5 text-[#9CA3AF]">{NA}</td>
+                    <td className="py-2.5 text-[#4B5563]">{p.campaign ?? NA}</td>
+                    <td className="py-2.5 text-[#4B5563]">{p.reach != null ? compact(p.reach) : NA}</td>
+                    <td className="py-2.5 text-[#4B5563]">{p.impressions != null ? compact(p.impressions) : NA}</td>
                     <td className="py-2.5 font-semibold text-[#1A1A1A]">{p.likes ?? NA}</td>
                     <td className="py-2.5 font-semibold text-[#1A1A1A]">{p.comments ?? NA}</td>
-                    <td className="py-2.5 text-[#9CA3AF]">{NA}</td>
-                    <td className="py-2.5 text-[#9CA3AF]">{NA}</td>
-                    <td className="py-2.5 text-[#9CA3AF]">{NA}</td>
+                    <td className="py-2.5 text-[#4B5563]">{p.shares != null ? compact(p.shares) : NA}</td>
+                    <td className="py-2.5 text-[#4B5563]">{p.saved != null ? compact(p.saved) : NA}</td>
+                    <td className="py-2.5 text-[#4B5563]">{p.engagementRate != null ? `${p.engagementRate}%` : NA}</td>
                   </tr>
                 ))}
               </tbody>
