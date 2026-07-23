@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { Link, useRouterState } from '@tanstack/react-router'
-import { Lock, Gauge, ChevronDown, ChevronsUpDown } from 'lucide-react'
+import { Lock, Gauge, ChevronDown, ChevronsUpDown, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
 import { NAV_ITEMS, planAllows } from './nav-items'
 import { cn } from '#/lib/utils'
 import type { Tenant } from '#/lib/types'
@@ -10,43 +10,89 @@ import type { Tenant } from '#/lib/types'
 export function Sidebar({ tenant }: { tenant: Tenant }) {
   const main = NAV_ITEMS.filter((i) => i.group === 'main')
   const system = NAV_ITEMS.filter((i) => i.group === 'system')
+  const [collapsed, setCollapsed] = useState(false)
 
   return (
-    <aside className="flex h-full w-[252px] shrink-0 flex-col border-r border-sidebar-border/50 bg-sidebar text-sidebar-foreground">
+    <aside
+      className={cn(
+        'flex h-full shrink-0 flex-col border-r border-sidebar-border/50 bg-sidebar text-sidebar-foreground transition-[width] duration-200',
+        collapsed ? 'w-[68px]' : 'w-[252px]',
+      )}
+    >
       {/* Brand */}
-      <div className="flex items-center gap-3 px-5 py-5">
-        <div className="flex h-10 w-10 items-center justify-center rounded-xl brand-bg shadow-sm">
+      <div
+        className={cn(
+          'flex gap-3 py-5',
+          collapsed ? 'flex-col items-center px-3' : 'items-center px-5',
+        )}
+      >
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl brand-bg shadow-sm">
           <Gauge className="h-[22px] w-[22px]" strokeWidth={2.2} />
         </div>
-        <div className="leading-tight">
-          <div className="text-[13.5px] font-bold tracking-tight text-white">
-            Dealer Intelligence
+        {!collapsed && (
+          <div className="min-w-0 flex-1 leading-tight">
+            <div className="truncate text-[13.5px] font-bold tracking-tight text-white">
+              Dealer Intelligence
+            </div>
+            <div className="text-[11px] text-sidebar-foreground/70">OS · {tenant.brand}</div>
           </div>
-          <div className="text-[11px] text-sidebar-foreground/70">OS · {tenant.brand}</div>
-        </div>
+        )}
+        <button
+          type="button"
+          onClick={() => setCollapsed((c) => !c)}
+          aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          aria-expanded={!collapsed}
+          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-sidebar-foreground/60 transition hover:bg-sidebar-accent/70 hover:text-white"
+        >
+          {collapsed ? (
+            <PanelLeftOpen className="h-[18px] w-[18px]" strokeWidth={2} />
+          ) : (
+            <PanelLeftClose className="h-[18px] w-[18px]" strokeWidth={2} />
+          )}
+        </button>
       </div>
 
       <nav className="flex-1 space-y-6 overflow-y-auto px-3 py-2">
-        <NavGroup label="Workspace" items={main} plan={tenant.subscription_plan} />
-        <NavGroup label="System" items={system} plan={tenant.subscription_plan} />
+        <NavGroup
+          label="Workspace"
+          items={main}
+          plan={tenant.subscription_plan}
+          collapsed={collapsed}
+        />
+        <NavGroup
+          label="System"
+          items={system}
+          plan={tenant.subscription_plan}
+          collapsed={collapsed}
+        />
       </nav>
 
       {/* Workspace selector */}
       <div className="px-3 py-4">
         <button
           type="button"
-          className="flex w-full items-center gap-3 rounded-[12px] border border-sidebar-border/60 bg-sidebar-accent/40 px-3 py-2.5 text-left transition hover:bg-sidebar-accent/70"
+          className={cn(
+            'flex w-full items-center gap-3 rounded-[12px] border border-sidebar-border/60 bg-sidebar-accent/40 py-2.5 text-left transition hover:bg-sidebar-accent/70',
+            collapsed ? 'justify-center px-2' : 'px-3',
+          )}
+          title={collapsed ? tenant.brand : undefined}
         >
           <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg brand-bg text-[12px] font-bold shadow-sm">
             {tenant.brand?.[0]?.toUpperCase() ?? 'W'}
           </div>
-          <div className="min-w-0 flex-1 leading-tight">
-            <div className="truncate text-[12.5px] font-semibold text-white">{tenant.brand}</div>
-            <div className="text-[10.5px] capitalize text-sidebar-foreground/60">
-              {tenant.subscription_plan} plan
-            </div>
-          </div>
-          <ChevronsUpDown className="h-4 w-4 shrink-0 text-sidebar-foreground/50" />
+          {!collapsed && (
+            <>
+              <div className="min-w-0 flex-1 leading-tight">
+                <div className="truncate text-[12.5px] font-semibold text-white">
+                  {tenant.brand}
+                </div>
+                <div className="text-[10.5px] capitalize text-sidebar-foreground/60">
+                  {tenant.subscription_plan} plan
+                </div>
+              </div>
+              <ChevronsUpDown className="h-4 w-4 shrink-0 text-sidebar-foreground/50" />
+            </>
+          )}
         </button>
       </div>
     </aside>
@@ -57,14 +103,16 @@ function NavGroup({
   label,
   items,
   plan,
+  collapsed,
 }: {
   label: string
   items: typeof NAV_ITEMS
   plan: Tenant['subscription_plan']
+  collapsed: boolean
 }) {
   return (
     <div>
-      <div className="kicker px-3 pb-2 text-sidebar-foreground/45">{label}</div>
+      {!collapsed && <div className="kicker px-3 pb-2 text-sidebar-foreground/45">{label}</div>}
       <ul className="space-y-0.5">
         {items.map((item) => {
           const allowed = planAllows(plan, item.minPlan)
@@ -73,24 +121,35 @@ function NavGroup({
             return (
               <li key={item.to}>
                 <div
-                  className="flex cursor-not-allowed items-center gap-3 rounded-[12px] px-3 py-2 text-[13.5px] font-medium text-sidebar-foreground/35"
+                  className={cn(
+                    'flex cursor-not-allowed items-center gap-3 rounded-[12px] px-3 py-2 text-[13.5px] font-medium text-sidebar-foreground/35',
+                    collapsed && 'justify-center',
+                  )}
                   title={`Requires ${item.minPlan} plan`}
                 >
-                  <Icon className="h-[18px] w-[18px]" strokeWidth={2} />
-                  <span className="flex-1">{item.label}</span>
-                  <Lock className="h-3.5 w-3.5" />
+                  <Icon className="h-[18px] w-[18px] shrink-0" strokeWidth={2} />
+                  {!collapsed && (
+                    <>
+                      <span className="flex-1">{item.label}</span>
+                      <Lock className="h-3.5 w-3.5" />
+                    </>
+                  )}
                 </div>
               </li>
             )
           }
-          if (item.children) {
+          if (item.children && !collapsed) {
             return <ExpandableNavItem key={item.to} item={item} />
           }
           return (
             <li key={item.to}>
               <Link
                 to={item.to}
-                className="group flex items-center gap-3 rounded-[12px] px-3 py-2 text-[13.5px] font-medium text-sidebar-foreground/80 transition-all duration-150 hover:bg-sidebar-accent/70 hover:text-white"
+                title={collapsed ? item.label : undefined}
+                className={cn(
+                  'group flex items-center gap-3 rounded-[12px] px-3 py-2 text-[13.5px] font-medium text-sidebar-foreground/80 transition-all duration-150 hover:bg-sidebar-accent/70 hover:text-white',
+                  collapsed && 'justify-center',
+                )}
                 activeProps={{
                   className: cn(
                     'bg-sidebar-accent text-white',
@@ -98,8 +157,8 @@ function NavGroup({
                   ),
                 }}
               >
-                <Icon className="h-[18px] w-[18px]" strokeWidth={2} />
-                <span>{item.label}</span>
+                <Icon className="h-[18px] w-[18px] shrink-0" strokeWidth={2} />
+                {!collapsed && <span>{item.label}</span>}
               </Link>
             </li>
           )
@@ -135,7 +194,10 @@ function ExpandableNavItem({ item }: { item: (typeof NAV_ITEMS)[number] }) {
           <span className="flex-1">{item.label}</span>
         </Link>
         <button
+          type="button"
           onClick={() => setOpen((o) => !o)}
+          aria-label={`${open ? 'Collapse' : 'Expand'} ${item.label}`}
+          aria-expanded={open}
           className="ml-0.5 flex h-7 w-7 items-center justify-center rounded-md text-sidebar-foreground/60 hover:text-white transition"
         >
           <ChevronDown

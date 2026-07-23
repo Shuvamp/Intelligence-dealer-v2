@@ -3,6 +3,7 @@ import { useRouter } from '@tanstack/react-router'
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -93,6 +94,9 @@ export function NewCampaignDialog({ open, onOpenChange, defaultValues }: Props) 
       <DialogContent className="max-w-md">
         <DialogHeader>
           <DialogTitle>New Campaign</DialogTitle>
+          <DialogDescription className="sr-only">
+            Create a campaign by entering its name, objective and schedule.
+          </DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4 pt-1">
           <div>

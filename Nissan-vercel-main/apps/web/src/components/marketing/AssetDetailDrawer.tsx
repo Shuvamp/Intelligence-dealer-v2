@@ -61,8 +61,12 @@ export function AssetDetailDrawer({ asset, onClose, onDelete, isFavorite, onTogg
   if (!asset) return null
 
   const image = isImage(asset.file_url)
+  // Supabase Storage already hands back an absolute URL; only legacy relative
+  // paths need the origin prepended.
   const absoluteUrl =
-    typeof window !== 'undefined' ? `${window.location.origin}${asset.file_url}` : asset.file_url
+    /^https?:\/\//i.test(asset.file_url) || typeof window === 'undefined'
+      ? asset.file_url
+      : `${window.location.origin}${asset.file_url}`
 
   function copyUrl() {
     navigator.clipboard.writeText(absoluteUrl).then(() => {
@@ -123,7 +127,14 @@ export function AssetDetailDrawer({ asset, onClose, onDelete, isFavorite, onTogg
                     // A cached image can be complete before onLoad can attach.
                     ref={(el) => {
                       if (el?.complete && el.naturalWidth) {
-                        setDims({ w: el.naturalWidth, h: el.naturalHeight })
+                        // An inline ref re-runs on every render, so bail out when
+                        // the dims are unchanged — a fresh object each time would
+                        // re-render → re-attach → loop ("Maximum update depth").
+                        setDims((d) =>
+                          d && d.w === el.naturalWidth && d.h === el.naturalHeight
+                            ? d
+                            : { w: el.naturalWidth, h: el.naturalHeight },
+                        )
                         setImgLoaded(true)
                       }
                     }}

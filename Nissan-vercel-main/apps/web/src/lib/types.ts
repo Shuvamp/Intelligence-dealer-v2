@@ -638,6 +638,19 @@ export interface PublishPlatformResult {
 }
 export type PublishResult = Record<string, PublishPlatformResult>
 
+// A publish outcome rendered in the top-bar notification bell. Derived from a
+// publishing row's channel_status + the tenant's connected channels — there is
+// no publish-notifications table.
+export interface PublishNotification {
+  id: string
+  title: string                                             // "Diwali Campaign · 12 Jun"
+  at: string                                                // published_at (or scheduled_at) ISO
+  tone: 'success' | 'partial' | 'error'
+  posted: Array<string>                                     // channels that succeeded
+  failed: Array<{ channel: string; message: string | null }>
+  missing: Array<{ channel: string; message: string | null }> // connected but not published to
+}
+
 // ---- Reports ----
 
 export interface ReportsData {

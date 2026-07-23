@@ -282,24 +282,37 @@ async def reject_opportunity(opp_id: str, tenant_id: str) -> None:
     await _patch("/rest/v1/opportunities", params, {"publish_status": "rejected"})
 
 
-async def publish_campaign(campaign_id: str, tenant_id: str, now_iso: str) -> None:
+def _published_body(now_iso: str, channel_status: str | None) -> dict[str, Any]:
+    """Patch body for a manual publish. `channel_status` (JSON per-platform
+    outcome) is only written when given, matching set_publish_status."""
+    body: dict[str, Any] = {"publish_status": "published", "published_at": now_iso}
+    if channel_status is not None:
+        body["channel_status"] = channel_status
+    return body
+
+
+async def publish_campaign(
+    campaign_id: str, tenant_id: str, now_iso: str, channel_status: str | None = None,
+) -> None:
     """Publish only items whose scheduled time has arrived (or has no schedule)."""
     params = [
         ("campaign_id", f"eq.{campaign_id}"), ("tenant_id", f"eq.{tenant_id}"),
         ("publish_status", "eq.queued"),
         ("or", f"(scheduled_at.is.null,scheduled_at.lte.{now_iso})"),
     ]
-    await _patch("/rest/v1/campaign_days", params, {"publish_status": "published", "published_at": now_iso})
+    await _patch("/rest/v1/campaign_days", params, _published_body(now_iso, channel_status))
 
 
-async def publish_opportunity(opp_id: str, tenant_id: str, now_iso: str) -> None:
+async def publish_opportunity(
+    opp_id: str, tenant_id: str, now_iso: str, channel_status: str | None = None,
+) -> None:
     """Publish only if scheduled time has arrived (or has no schedule)."""
     params = [
         ("id", f"eq.{opp_id}"), ("tenant_id", f"eq.{tenant_id}"),
         ("publish_status", "eq.queued"),
         ("or", f"(scheduled_at.is.null,scheduled_at.lte.{now_iso})"),
     ]
-    await _patch("/rest/v1/opportunities", params, {"publish_status": "published", "published_at": now_iso})
+    await _patch("/rest/v1/opportunities", params, _published_body(now_iso, channel_status))
 
 
 async def process_due(tenant_id: str, now_iso: str) -> None:

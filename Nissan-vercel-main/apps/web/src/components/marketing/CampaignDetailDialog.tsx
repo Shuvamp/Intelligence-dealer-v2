@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '#/components/ui/dialog'
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '#/components/ui/dialog'
 import { deleteCampaignById } from '#/lib/marketing'
 import type { CampaignSummary } from '#/lib/types'
 import { Loader2, Trash2 } from 'lucide-react'
@@ -69,6 +69,9 @@ export function CampaignDetailDialog({ campaign, open, onOpenChange, onDeleted }
       <DialogContent className="max-w-sm">
         <DialogHeader>
           <DialogTitle className="pr-6 text-[16px] leading-snug">{campaign.name}</DialogTitle>
+          <DialogDescription className="sr-only">
+            Details for this campaign — status, objective, schedule and metrics.
+          </DialogDescription>
         </DialogHeader>
 
         <div className="mt-3 space-y-4">

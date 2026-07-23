@@ -24,13 +24,15 @@ export const signOut = createServerFn({ method: 'POST' }).handler(async () => {
 export const getSessionUser = createServerFn({ method: 'GET' }).handler(
   async (): Promise<SessionUser | null> => {
     const supabase = getSupabaseServerClient()
-    const { data: { session } } = await supabase.auth.getSession()
-    if (!session?.user) return null
+    // getUser() (not getSession()) — it re-validates the JWT against the Auth
+    // server, so identity here can't be forged from a tampered cookie.
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return null
 
     const { data: profile } = await supabase
       .from('users')
       .select('id, full_name, email, role, tenant_id')
-      .eq('id', session.user.id)
+      .eq('id', user.id)
       .single()
     if (!profile) return null
 

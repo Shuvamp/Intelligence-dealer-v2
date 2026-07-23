@@ -5,9 +5,9 @@ import type { MediaAsset } from '#/lib/types'
 import { AssetUploadDialog } from '#/components/marketing/AssetUploadDialog'
 import { AssetDetailDrawer } from '#/components/marketing/AssetDetailDrawer'
 import {
-  Upload, Grid3X3, List, FileText, Search, Trash2,
+  Upload, Grid3X3, List, FileText, Trash2,
   Download, Star, Boxes, Car, Palette, Layers, Sparkles,
-  Clock, Heart, Layout, ChevronRight, Copy, Check, Eye, RotateCcw,
+  Clock, Heart, ChevronRight, Copy, Check, Eye, RotateCcw,
   SlidersHorizontal, FileStack,
 } from 'lucide-react'
 import { cn } from '#/lib/utils'
@@ -65,7 +65,6 @@ function MediaLibrary() {
   const [favorites, setFavorites] = useState<Set<string>>(new Set())
 
   const [layout, setLayout] = useState<'grid' | 'list'>('grid')
-  const [search, setSearch] = useState('')
   const [view, setView] = useState<View>({ kind: 'all' })
   const [sort, setSort] = useState<SortKey>('newest')
   const [typeFilter, setTypeFilter] = useState<AssetType | 'all'>('all')
@@ -162,15 +161,6 @@ function MediaLibrary() {
     let list = base
     if (typeFilter !== 'all') list = list.filter((a) => a.asset_type === typeFilter)
     if (vehicleFilter !== 'all') list = list.filter((a) => a.vehicle === vehicleFilter)
-    if (search.trim()) {
-      const q = search.toLowerCase()
-      list = list.filter(
-        (a) =>
-          a.name.toLowerCase().includes(q) ||
-          a.vehicle?.toLowerCase().includes(q) ||
-          a.sub_category?.toLowerCase().includes(q),
-      )
-    }
     const sorted = [...list]
     if (sort === 'name') sorted.sort((a, b) => a.name.localeCompare(b.name))
     else sorted.sort((a, b) => {
@@ -179,7 +169,7 @@ function MediaLibrary() {
       return sort === 'newest' ? db - da : da - db
     })
     return sorted
-  }, [base, typeFilter, vehicleFilter, search, sort])
+  }, [base, typeFilter, vehicleFilter, sort])
 
   const toggleSel = (id: string) =>
     setSelected((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]))
@@ -275,15 +265,6 @@ function MediaLibrary() {
               <p className="text-[10px] text-muted-foreground mt-0.5">Digital Asset Manager</p>
             </div>
           </div>
-          <div className="relative">
-            <Search className="h-3.5 w-3.5 text-muted-foreground absolute left-2.5 top-1/2 -translate-y-1/2" />
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search all assets…"
-              className="w-full h-9 pl-8 pr-2.5 rounded-[10px] border border-border bg-white text-[12px] text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-[var(--brand)] focus:ring-2 focus:ring-[color-mix(in_oklab,var(--brand)_18%,transparent)] transition"
-            />
-          </div>
         </div>
 
         <nav className="flex-1 overflow-y-auto px-2.5 pb-3 space-y-0.5">
@@ -292,7 +273,7 @@ function MediaLibrary() {
           <NavItem active={view.kind === 'favorites'} onClick={() => setView({ kind: 'favorites' })} icon={<Heart className="h-4 w-4" />} label="Favorites" count={favorites.size} />
 
           <SectionLabel>Library</SectionLabel>
-          {(['vehicle', 'logo', 'background', 'brand_asset'] as AssetType[]).map((t) => (
+          {(['vehicle', 'logo', 'background'] as AssetType[]).map((t) => (
             <NavItem
               key={t}
               active={view.kind === 'type' && view.type === t}
@@ -302,7 +283,6 @@ function MediaLibrary() {
               count={typeCounts[t]}
             />
           ))}
-          <NavItem active={false} onClick={() => setView({ kind: 'all' })} icon={<Layout className="h-4 w-4 text-emerald-600" />} label="Campaign Assets" count={typeCounts.brand_asset} muted />
 
           {vehicles.length > 0 && (
             <>
@@ -353,7 +333,7 @@ function MediaLibrary() {
                 {view.kind === 'trash' ? 'Trash' : view.kind === 'favorites' ? 'Favorites' : view.kind === 'recent' ? 'Recently Uploaded' : view.kind === 'type' ? `${TYPE_META[view.type].label}s` : view.kind === 'vehicle' ? view.vehicle : 'Media Library'}
               </h1>
               <p className="text-[13px] text-muted-foreground mt-1">
-                {assets.length} {assets.length === 1 ? 'asset' : 'assets'}
+                {filtered.length} {filtered.length === 1 ? 'asset' : 'assets'}
               </p>
             </div>
             {!inTrash && (
@@ -495,8 +475,8 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
   return <p className="text-[10px] font-semibold text-muted-foreground/70 px-2.5 pt-3 pb-1 uppercase tracking-wider">{children}</p>
 }
 
-function NavItem({ active, onClick, icon, label, count, muted }: {
-  active: boolean; onClick: () => void; icon: React.ReactNode; label: string; count: number; muted?: boolean
+function NavItem({ active, onClick, icon, label, count }: {
+  active: boolean; onClick: () => void; icon: React.ReactNode; label: string; count: number
 }) {
   return (
     <button
@@ -506,7 +486,7 @@ function NavItem({ active, onClick, icon, label, count, muted }: {
         active ? 'bg-[color-mix(in_oklab,var(--brand)_12%,transparent)] text-[var(--brand)]' : 'text-foreground hover:bg-muted/50',
       )}
     >
-      <span className={cn('shrink-0', active ? 'text-[var(--brand)]' : muted ? 'text-muted-foreground' : '')}>{icon}</span>
+      <span className={cn('shrink-0', active && 'text-[var(--brand)]')}>{icon}</span>
       <span className="text-[12px] font-semibold flex-1 truncate">{label}</span>
       <span className={cn('text-[10px] font-semibold num px-1.5 py-0.5 rounded-md', active ? 'bg-white/70 text-[var(--brand)]' : 'text-muted-foreground bg-muted/60 group-hover:bg-white')}>{count}</span>
     </button>

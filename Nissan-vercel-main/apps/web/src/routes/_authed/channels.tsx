@@ -12,7 +12,7 @@ import {
   connectWhatsApp,
   disconnectWhatsApp,
 } from '#/lib/marketing'
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '#/components/ui/dialog'
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '#/components/ui/dialog'
 import type { ChannelConnection, LinkedInState } from '#/lib/types'
 import {
   CheckCircle2, RefreshCw, ExternalLink, Loader2, AlertCircle,
@@ -891,6 +891,9 @@ function ConnectedChannels() {
             <DialogTitle className="flex items-center gap-2 text-[15px]">
               <ChannelIcon channel="whatsapp" /> Connect WhatsApp Business
             </DialogTitle>
+            <DialogDescription className="sr-only">
+              Enter your WhatsApp Cloud API phone number ID and access token to connect the channel.
+            </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
             <p className="text-[12.5px] leading-relaxed text-muted-foreground">

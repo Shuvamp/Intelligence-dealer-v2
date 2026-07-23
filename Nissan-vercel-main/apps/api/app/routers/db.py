@@ -117,7 +117,8 @@ async def pub_reject_campaign(payload: dict = Body(...)) -> dict:
 
 @router.post("/publishing/publish-campaign")
 async def pub_publish_campaign(payload: dict = Body(...)) -> dict:
-    await _ok_or_500(db.publish_campaign, payload["campaign_id"], payload["tenant_id"], _now_iso())
+    await _ok_or_500(db.publish_campaign, payload["campaign_id"], payload["tenant_id"], _now_iso(),
+                     payload.get("channel_status"))
     return {"ok": True}
 
 
@@ -135,7 +136,8 @@ async def pub_reject_event(payload: dict = Body(...)) -> dict:
 
 @router.post("/publishing/publish-event")
 async def pub_publish_event(payload: dict = Body(...)) -> dict:
-    await _ok_or_500(db.publish_opportunity, payload["id"], payload["tenant_id"], _now_iso())
+    await _ok_or_500(db.publish_opportunity, payload["id"], payload["tenant_id"], _now_iso(),
+                     payload.get("channel_status"))
     return {"ok": True}
 
 

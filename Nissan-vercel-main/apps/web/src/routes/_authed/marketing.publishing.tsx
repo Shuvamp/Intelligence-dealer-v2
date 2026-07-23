@@ -9,7 +9,7 @@ import {
   Send, Clock, CheckCircle2, RefreshCw, CalendarDays, XCircle, Star, Car, Inbox, Loader2,
   Link2, AlertCircle, MinusCircle,
 } from 'lucide-react'
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '#/components/ui/dialog'
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '#/components/ui/dialog'
 import { cn } from '#/lib/utils'
 
 export const Route = createFileRoute('/_authed/marketing/publishing')({
@@ -490,6 +490,11 @@ function Publishing() {
                 : <Send className="h-4 w-4 text-[#C3002F]" />}
               {confirm?.action === 'reject' ? 'Reject campaign?' : 'Publish overdue posts?'}
             </DialogTitle>
+            <DialogDescription className="sr-only">
+              {confirm?.action === 'reject'
+                ? 'Confirm removing this campaign from the publishing queue.'
+                : 'Confirm publishing the overdue posts in this campaign now.'}
+            </DialogDescription>
           </DialogHeader>
           {confirm && (
             <div className="space-y-4">
@@ -539,6 +544,9 @@ function Publishing() {
               <Send className="h-4 w-4 text-[#C3002F]" />
               Publish results
             </DialogTitle>
+            <DialogDescription className="sr-only">
+              Per-channel outcome of the posts that were just published.
+            </DialogDescription>
           </DialogHeader>
           {outcome && (
             <div className="space-y-3">

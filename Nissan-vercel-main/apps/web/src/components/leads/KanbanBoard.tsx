@@ -55,7 +55,10 @@ export function KanbanBoard({
   }
 
   return (
-    <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
+    // Explicit id — without one dnd-kit derives its `aria-describedby` from a
+    // global counter that starts over on the client, so SSR emits
+    // `DndDescribedBy-0` and hydration expects `-1` (hydration mismatch).
+    <DndContext id="leads-kanban" sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
       <div className="flex gap-3 overflow-x-auto pb-2">
         {columns.map((col) => (
           <BoardColumn key={col.stage} stage={col.stage} leads={col.leads} value={col.value} />

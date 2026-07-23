@@ -1,16 +1,16 @@
 import type { CSSProperties, ReactNode } from 'react'
 import { Sidebar } from './Sidebar'
 import { TopBar } from './TopBar'
-import type { SessionUser } from '#/lib/types'
+import type { PublishNotification, SessionUser } from '#/lib/types'
 
 export function AppShell({
   user,
-  unread,
+  notifications,
   onSignOut,
   children,
 }: {
   user: SessionUser
-  unread: number
+  notifications: Array<PublishNotification>
   onSignOut: () => void
   children: ReactNode
 }) {
@@ -22,7 +22,7 @@ export function AppShell({
     <div style={style} className="flex h-screen overflow-hidden">
       <Sidebar tenant={user.tenant} />
       <div className="flex min-w-0 flex-1 flex-col app-canvas">
-        <TopBar user={user} unread={unread} onSignOut={onSignOut} />
+        <TopBar user={user} notifications={notifications} onSignOut={onSignOut} />
         <main className="flex-1 overflow-y-auto">
           <div className="mx-auto w-full max-w-[1240px] px-6 py-7">{children}</div>
         </main>

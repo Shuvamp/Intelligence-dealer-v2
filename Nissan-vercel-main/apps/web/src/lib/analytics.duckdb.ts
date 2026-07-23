@@ -205,8 +205,14 @@ export async function approveCampaignDb(campaignId: string, tenantId: string, po
 export async function rejectCampaignDb(campaignId: string, tenantId: string): Promise<void> {
   await apiPost('/db/publishing/reject-campaign', { campaign_id: campaignId, tenant_id: tenantId })
 }
-export async function publishCampaignDb(campaignId: string, tenantId: string): Promise<void> {
-  await apiPost('/db/publishing/publish-campaign', { campaign_id: campaignId, tenant_id: tenantId })
+// `channelStatus` is the JSON-encoded per-platform outcome of the publish push;
+// omit it when there was no per-channel attempt to report.
+export async function publishCampaignDb(
+  campaignId: string, tenantId: string, channelStatus?: string,
+): Promise<void> {
+  await apiPost('/db/publishing/publish-campaign', {
+    campaign_id: campaignId, tenant_id: tenantId, channel_status: channelStatus ?? null,
+  })
 }
 export async function approveEventDb(id: string, tenantId: string, postTime: string): Promise<void> {
   await apiPost('/db/publishing/approve-event', { id, tenant_id: tenantId, post_time: postTime })
@@ -214,8 +220,12 @@ export async function approveEventDb(id: string, tenantId: string, postTime: str
 export async function rejectEventDb(id: string, tenantId: string): Promise<void> {
   await apiPost('/db/publishing/reject-event', { id, tenant_id: tenantId })
 }
-export async function publishEventDb(id: string, tenantId: string): Promise<void> {
-  await apiPost('/db/publishing/publish-event', { id, tenant_id: tenantId })
+export async function publishEventDb(
+  id: string, tenantId: string, channelStatus?: string,
+): Promise<void> {
+  await apiPost('/db/publishing/publish-event', {
+    id, tenant_id: tenantId, channel_status: channelStatus ?? null,
+  })
 }
 export async function listPublishingDb(tenantId: string): Promise<DuckPublishingRow[]> {
   return apiGet<DuckPublishingRow[]>('/db/publishing', { tenant_id: tenantId })

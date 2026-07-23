@@ -60,7 +60,11 @@ function Dashboard() {
       } catch {}
     }
     es.onerror = () => {
-      console.warn('[Dashboard] SSE connection error — will auto-reconnect')
+      // CONNECTING = the browser is already retrying; that's normal churn on
+      // navigation/HMR. Only a CLOSED stream is worth reporting.
+      if (es.readyState === EventSource.CLOSED) {
+        console.warn('[Dashboard] SSE connection closed')
+      }
     }
     return () => {
       es.close()

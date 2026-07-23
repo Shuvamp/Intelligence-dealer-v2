@@ -1,6 +1,7 @@
 import { createFileRoute, redirect, Outlet, useRouter } from '@tanstack/react-router'
 import { getSessionUser, signOut } from '#/lib/auth'
 import { getDashboardData, type DashboardData } from '#/lib/queries'
+import { getPublishNotifications } from '#/lib/marketing'
 import { AppShell } from '#/components/shell/AppShell'
 
 const EMPTY_DASHBOARD: DashboardData = {
@@ -24,11 +25,11 @@ export const Route = createFileRoute('/_authed')({
     return { user }
   },
   loader: async () => {
-    try {
-      return { dashboard: await getDashboardData() }
-    } catch {
-      return { dashboard: EMPTY_DASHBOARD }
-    }
+    const [dashboard, notifications] = await Promise.all([
+      getDashboardData().catch(() => EMPTY_DASHBOARD),
+      getPublishNotifications().catch(() => []),
+    ])
+    return { dashboard, notifications }
   },
   errorComponent: AuthErrorBoundary,
   component: AuthedLayout,
@@ -62,7 +63,7 @@ function AuthErrorBoundary({ error, reset }: { error: Error; reset: () => void }
 
 function AuthedLayout() {
   const { user } = Route.useRouteContext()
-  const { dashboard } = Route.useLoaderData()
+  const { notifications } = Route.useLoaderData()
 
   async function handleSignOut() {
     await signOut()
@@ -70,7 +71,7 @@ function AuthedLayout() {
   }
 
   return (
-    <AppShell user={user} unread={dashboard.unreadNotifications} onSignOut={handleSignOut}>
+    <AppShell user={user} notifications={notifications} onSignOut={handleSignOut}>
       <Outlet />
     </AppShell>
   )

@@ -1,6 +1,7 @@
-import { Search, Bell, LogOut } from 'lucide-react'
+import { Search, LogOut } from 'lucide-react'
 import { initials } from '#/components/ui/kit'
-import type { SessionUser } from '#/lib/types'
+import { NotificationsMenu } from './NotificationsMenu'
+import type { PublishNotification, SessionUser } from '#/lib/types'
 
 const ROLE_LABEL: Record<string, string> = {
   dealer_owner: 'Owner',
@@ -11,11 +12,11 @@ const ROLE_LABEL: Record<string, string> = {
 
 export function TopBar({
   user,
-  unread,
+  notifications,
   onSignOut,
 }: {
   user: SessionUser
-  unread: number
+  notifications: Array<PublishNotification>
   onSignOut: () => void
 }) {
   return (
@@ -38,17 +39,7 @@ export function TopBar({
       </div>
 
       <div className="ml-auto flex items-center gap-2">
-        <button
-          className="relative grid h-10 w-10 place-items-center rounded-lg text-muted-foreground transition hover:bg-muted hover:text-foreground"
-          aria-label="Notifications"
-        >
-          <Bell className="h-[18px] w-[18px]" />
-          {unread > 0 ? (
-            <span className="absolute right-1.5 top-1.5 grid h-4 min-w-4 place-items-center rounded-full brand-bg px-1 text-[10px] font-bold leading-none">
-              {unread}
-            </span>
-          ) : null}
-        </button>
+        <NotificationsMenu items={notifications} />
 
         <div className="mx-1 h-7 w-px bg-border" />
 

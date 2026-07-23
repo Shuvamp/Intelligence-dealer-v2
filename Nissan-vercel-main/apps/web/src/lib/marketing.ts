@@ -1,5 +1,6 @@
 import { createServerFn } from '@tanstack/react-start'
 import { getSupabaseServerClient } from './supabase.server'
+import { derivePublishNotification } from './publish-notifications'
 import type {
   Campaign,
   CampaignObjective,
@@ -16,6 +17,7 @@ import type {
   MonthPlan,
   OpportunityKind,
   PublishingItem,
+  PublishNotification,
   PublishStatus,
   PostChannel,
   PostStatus,
@@ -1688,10 +1690,27 @@ export const publishGroupToConnected = createServerFn({ method: 'POST' })
       }
     }
 
+    // Collapse the per-post tally into one PublishPlatformResult per channel, so
+    // the queue and the notification bell can read a real outcome for a manual
+    // publish (previously only the scheduled auto-publisher wrote this).
+    // A channel with ANY error reads as error — a partial push is not a success.
+    const channelStatus: PublishResult = {}
+    for (const [channel, t] of Object.entries(perChannel)) {
+      const status = t.error > 0 ? 'error' : t.success > 0 ? 'success' : 'skipped'
+      channelStatus[channel] = {
+        status,
+        ...(status === 'error'
+          ? { error: t.message ?? `${t.error}/${t.success + t.skipped + t.error} posts failed` }
+          : {}),
+        ...(status === 'skipped' && t.message ? { reason: t.message } : {}),
+      }
+    }
+    const encoded = Object.keys(channelStatus).length > 0 ? JSON.stringify(channelStatus) : undefined
+
     // Move the group into the Published column regardless of per-channel outcome
     // (preserves the existing publishCampaign/publishEvent queue behaviour).
-    if (data.kind === 'campaign') await publishCampaignDb(data.group_id, tenantId)
-    else await publishEventDb(data.group_id, tenantId)
+    if (data.kind === 'campaign') await publishCampaignDb(data.group_id, tenantId, encoded)
+    else await publishEventDb(data.group_id, tenantId, encoded)
 
     return { perChannel, postCount: posts.length }
   })
@@ -2410,9 +2429,44 @@ export const getPublishing = createServerFn({ method: 'GET' }).handler(
         scheduled_at: r.scheduled_at ?? null,
         publish_status: (r.publish_status as PublishStatus) ?? 'queued',
         published_at: r.published_at ?? null,
+        channel_status: r.channel_status ?? null,
       }))
     } catch (e) {
       console.error('[getPublishing] failed:', e)
+      return []
+    }
+  },
+)
+
+// Publish outcomes for the top-bar bell: what actually landed on each social
+// channel, what failed, and which connected channels a post never reached.
+// Derived from the publishing rows' channel_status JSON — nothing is stored.
+export const getPublishNotifications = createServerFn({ method: 'GET' }).handler(
+  async (): Promise<Array<PublishNotification>> => {
+    try {
+      const supabase = getSupabaseServerClient()
+      const { tenantId } = await authCtx(supabase)
+      if (!tenantId) return []
+
+      const { listPublishingDb } = await import('./analytics.duckdb')
+      const [rows, connected] = await Promise.all([
+        listPublishingDb(tenantId),
+        fetch(`${FASTAPI_URL}/api/channels?tenant_id=${tenantId}`)
+          .then((r) => (r.ok ? (r.json() as Promise<Array<ChannelConnection>>) : []))
+          // Without the channel list we simply can't report "missing" channels.
+          .catch(() => [] as Array<ChannelConnection>),
+      ])
+      const connectedChannels = connected
+        .filter((c) => c.status === 'connected')
+        .map((c) => c.channel)
+
+      return rows
+        .filter((r) => r.publish_status === 'published' || r.publish_status === 'failed')
+        .map((r) => derivePublishNotification(r, connectedChannels))
+        .sort((a, b) => b.at.localeCompare(a.at))
+        .slice(0, 20)
+    } catch (e) {
+      console.error('[getPublishNotifications] failed:', e)
       return []
     }
   },

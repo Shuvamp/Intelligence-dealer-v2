@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '#/components/ui/dialog'
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '#/components/ui/dialog'
 import { createCampaign } from '#/lib/marketing'
 import type { CampaignObjective, CampaignSummary } from '#/lib/types'
 import { Loader2 } from 'lucide-react'
@@ -75,6 +75,9 @@ export function QuickCampaignDialog({ open, onOpenChange, date, initialName = ''
       <DialogContent className="max-w-md">
         <DialogHeader>
           <DialogTitle className="text-[16px]">New Campaign</DialogTitle>
+          <DialogDescription className="sr-only">
+            Create a campaign by entering its name, objective and schedule.
+          </DialogDescription>
         </DialogHeader>
 
         <div className="mt-1 space-y-4">

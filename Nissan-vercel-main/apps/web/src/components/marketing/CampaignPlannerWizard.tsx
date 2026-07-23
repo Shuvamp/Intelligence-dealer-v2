@@ -4,6 +4,7 @@ import { Loader2, AlertTriangle, Zap, CheckCircle2, ChevronRight, ChevronLeft, I
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
 } from '#/components/ui/dialog'
@@ -843,6 +844,11 @@ export function CampaignPlannerWizard({ open, onOpenChange, defaultValues }: Pro
             <Zap className="h-4 w-4 text-[#C3002F]" />
             {summary ? 'Campaign Created' : 'New Campaign'}
           </DialogTitle>
+          <DialogDescription className="sr-only">
+            {summary
+              ? 'Your campaign was created — review the generated plan.'
+              : 'Guided steps to set up a campaign and generate its content plan.'}
+          </DialogDescription>
           {!generating && !summary && <StepIndicator current={step} />}
         </DialogHeader>
 
