@@ -35,10 +35,10 @@ from .utils import (
 
 logger = logging.getLogger(__name__)
 
-# llama-3.1-8b-instant has a far higher free-tier daily token budget than the
-# 70b model (which exhausts the 100k TPD limit after ~10 full-rubric calls).
-# Override with GROQ_MODEL env if you have a paid tier and want the larger model.
-MODEL = os.environ.get("GROQ_MODEL", "llama-3.1-8b-instant")
+# Use the stronger Groq default already configured in apps/api/app/config.py.
+# GROQ_MODEL still overrides this, so teams on smaller tiers can pin a cheaper
+# model explicitly if needed.
+MODEL = os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile")
 
 
 # NVIDIA NIM is an OpenAI-compatible inference API (integrate.api.nvidia.com).
@@ -718,12 +718,14 @@ def _clamp_int(v, lo, hi):
 def _build_holistic_prompt(rubric: str, state: LeadState, interaction_text: str) -> str:
     flags = state.get("missing_data_flags", []) or []
     vflags = state.get("validation_flags", []) or []
+    signal_summary = state.get("signal_summary") or "(not provided)"
     return f"""You are the automotive lead scoring engine for a Nissan dealership.
 Score the lead STRICTLY using the framework below — the documented point values,
 caps, edge cases, buying/negative signals, budget bands, competitor and journey
 rules are authoritative. Use ONLY evidence present in the lead; never invent
 interactions. If data for a dimension is absent, score it low and add a missing-
-data flag rather than guessing high.
+data flag rather than guessing high. Treat the structured signal summary below as
+higher priority than vague prose when they overlap.
 
 ================= SCORING FRAMEWORK (authoritative) =================
 {rubric}
@@ -735,6 +737,8 @@ LEAD TO SCORE
 - Email: {state.get('email') or '(missing)'}
 - System missing-data flags: {flags}
 - System validation flags: {vflags}
+- Structured signal summary:
+{signal_summary}
 - Interaction log:
 {interaction_text}
 
@@ -742,6 +746,8 @@ Score each of the 8 dimensions within its maximum:
 intent (0-25), engagement (0-20), urgency (0-15), financial_readiness (0-15),
 product_fit (0-10), competitive_risk (0-5, penalty model starting at 5),
 relationship_strength (0-5), sentiment_score (0-5).
+Use the structured signal summary to anchor intent, urgency, financial readiness,
+relationship, and competitive risk before using the interaction log for nuance.
 List up to 2 specific evidence items as `strengths` and up to 1 `risk`. Be
 terse: keep reasoning <=25 words and recommended_action <=12 words.
 
