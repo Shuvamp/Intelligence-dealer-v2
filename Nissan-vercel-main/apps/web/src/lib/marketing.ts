@@ -3,6 +3,7 @@ import { getSupabaseServerClient } from './supabase.server'
 import { derivePublishNotification } from './publish-notifications'
 import type {
   Campaign,
+  CampaignDay,
   CampaignObjective,
   CampaignPlanInput,
   CampaignPlanResult,
@@ -10,7 +11,9 @@ import type {
   CampaignScorecard,
   CampaignStatus,
   CampaignSummary,
+  ChannelConnection,
   ContentStatus,
+  LinkedInProfileResult,
   MarketingOverview,
   MediaAsset,
   MonthOpportunity,
@@ -778,13 +781,13 @@ function duckRowToCampaign(
   counts: { postCount: number; publishedCount: number },
 ): CampaignSummary {
   const parsedAssets: SelectedAsset[] = r.selected_assets
-    ? (() => { try { return JSON.parse(r.selected_assets as string) } catch { return [] } })()
+    ? (() => { try { return JSON.parse(r.selected_assets) } catch { return [] } })()
     : []
   const parsedLogo: SelectedAsset | null = r.selected_logo
-    ? (() => { try { return JSON.parse(r.selected_logo as string) } catch { return null } })()
+    ? (() => { try { return JSON.parse(r.selected_logo) } catch { return null } })()
     : null
   const parsedLogo2: SelectedAsset | null = r.selected_logo_2
-    ? (() => { try { return JSON.parse(r.selected_logo_2 as string) } catch { return null } })()
+    ? (() => { try { return JSON.parse(r.selected_logo_2) } catch { return null } })()
     : null
   return {
     id: r.campaign_id,
@@ -794,7 +797,7 @@ function duckRowToCampaign(
     theme: r.theme ?? null,
     objective: (r.objective as CampaignObjective) ?? 'awareness',
     status: (r.status as CampaignStatus) ?? 'draft',
-    channels: (r.channels as string[] | null) ?? [],
+    channels: r.channels ?? [],
     start_date: toDateStr(r.start_date),
     end_date: toDateStr(r.end_date),
     budget: null,
@@ -809,7 +812,7 @@ function duckRowToCampaign(
     selected_logo_2: parsedLogo2,
     vehicles: parsedAssets.length > 0
       ? [...new Set(parsedAssets.map((a) => a.vehicle))]
-      : (r.vehicle ? (r.vehicle as string).split(',').filter(Boolean) : []),
+      : (r.vehicle ? r.vehicle.split(',').filter(Boolean) : []),
     posting_time: r.posting_time ?? null,
     goal: r.goal ?? null,
   }
@@ -879,7 +882,7 @@ export const getDuckCampaigns = createServerFn({ method: 'GET' }).handler(
 )
 
 export const getDuckCampaignDays = createServerFn({ method: 'GET' }).handler(
-  async (): Promise<Array<import('./types').CampaignDay>> => {
+  async (): Promise<Array<CampaignDay>> => {
     try {
       const supabase = getSupabaseServerClient()
       const { tenantId } = await authCtx(supabase)
@@ -898,7 +901,7 @@ export const getDuckCampaignDays = createServerFn({ method: 'GET' }).handler(
         hashtags: r.hashtags ?? undefined,
         cta: r.cta ?? undefined,
         offer: r.offer ?? undefined,
-        content_status: (r.content_status as import('./types').ContentStatus) ?? 'pending',
+        content_status: (r.content_status as ContentStatus) ?? 'pending',
         poster_url: r.poster_url ?? undefined,
         video_url: r.video_url ?? undefined,
       }))
@@ -1184,7 +1187,6 @@ export const getPublishedLog = createServerFn({ method: 'GET' }).handler(
 // =====================================================================
 // Media Library — Supabase Postgres (marketing_assets table + Storage)
 // =====================================================================
-import type { ChannelConnection, LinkedInProfileResult } from './types'
 
 async function queryAssets(
   supabase: ReturnType<typeof getSupabaseServerClient>,
@@ -2441,12 +2443,12 @@ function parseTimeToHHMM(s?: string | null): string {
   const t = s.trim()
   let m = t.match(/^(\d{1,2}):(\d{2})\s*([AaPp][Mm])$/)
   if (m) {
-    let h = parseInt(m[1]!, 10) % 12
-    if (/[Pp]/.test(m[3]!)) h += 12
+    let h = parseInt(m[1], 10) % 12
+    if (/[Pp]/.test(m[3])) h += 12
     return `${String(h).padStart(2, '0')}:${m[2]}`
   }
   m = t.match(/^(\d{1,2}):(\d{2})$/)
-  if (m) return `${m[1]!.padStart(2, '0')}:${m[2]}`
+  if (m) return `${m[1].padStart(2, '0')}:${m[2]}`
   return '10:00'
 }
 

@@ -48,7 +48,7 @@ export const Route = createFileRoute('/_authed/marketing/dashboard')({
     const effectiveChannel =
       deps.channel && deps.channel !== 'all' ? deps.channel
       : deps.channel === 'all' ? 'all'
-      : connected.length === 1 ? connected[0]!
+      : connected.length === 1 ? connected[0]
       : 'all'
     // Previous period, same length, immediately before the current range —
     // powers the "vs previous period" deltas on the new KPI cards. Reuses

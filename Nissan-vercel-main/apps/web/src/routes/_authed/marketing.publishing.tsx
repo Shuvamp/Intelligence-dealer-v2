@@ -101,7 +101,7 @@ function fmtDateTime(iso?: string | null): string {
   const [d, t] = iso.split('T')
   if (!d) return iso
   const [y, m, day] = d.split('-').map(Number)
-  const label = new Date(y!, m! - 1, day!).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
+  const label = new Date(y, m - 1, day).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
   return t ? `${label} · ${t.substring(0, 5)}` : label
 }
 

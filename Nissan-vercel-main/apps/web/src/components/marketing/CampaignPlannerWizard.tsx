@@ -11,7 +11,8 @@ import {
 import { generateCampaignPlan, createCampaignFromPlan, getMediaAssets, suggestCampaignDescription } from '#/lib/marketing'
 import type { CampaignGoal, CampaignPlanInput, CampaignPlanResult, CampaignType, MediaAsset, SelectedAsset } from '#/lib/types'
 import { cn } from '#/lib/utils'
-import { getVoiceProvider, type VoiceSession } from './voiceInput'
+import { getVoiceProvider } from './voiceInput'
+import type { VoiceSession } from './voiceInput'
 import { to12hDisplay, parse12hInput } from './time12h'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -122,7 +123,7 @@ function CampaignSummaryView({ plan }: { plan: CampaignPlanResult }) {
   const durationDays = plan.days.length
   const dateLabel = (iso: string) => {
     const [y, m, d] = iso.split('-').map(Number)
-    return new Date(y!, m! - 1, d!).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
+    return new Date(y, m - 1, d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
   }
   return (
     <div className="space-y-5">
@@ -300,7 +301,7 @@ interface VoiceSupport {
 // SpeechRecognition but flaky (partial). Firefox has none.
 function detectVoiceSupport(): VoiceSupport {
   if (typeof window === 'undefined') return { level: 'none', label: '' }
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   const w = window as any
   const hasSR = !!(w.SpeechRecognition || w.webkitSpeechRecognition)
   if (!hasSR) return { level: 'none', label: 'Not supported' }
@@ -589,7 +590,7 @@ export function CampaignPlannerWizard({ open, onOpenChange, defaultValues }: Pro
             </div>
             <div>
               <label htmlFor="campaign-type" className={labelClass}>Campaign Type <span className="text-[#C3002F]">*</span></label>
-              <select id="campaign-type" className={fieldClass} value={form.campaign_type} onChange={(e) => set('campaign_type', e.target.value as CampaignType)}>
+              <select id="campaign-type" className={fieldClass} value={form.campaign_type} onChange={(e) => set('campaign_type', e.target.value)}>
                 {CAMPAIGN_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
               </select>
             </div>
@@ -652,7 +653,7 @@ export function CampaignPlannerWizard({ open, onOpenChange, defaultValues }: Pro
                 className={`${fieldClass} resize-none`}
                 rows={2}
                 value={(GOALS as readonly string[]).includes(form.goal) ? '' : form.goal}
-                onChange={(e) => set('goal', e.target.value as CampaignGoal)}
+                onChange={(e) => set('goal', e.target.value)}
                 placeholder="e.g. Drive weekend showroom footfall with an exchange offer"
               />
             </div>

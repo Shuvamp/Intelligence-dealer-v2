@@ -52,7 +52,7 @@ export interface VoiceProvider {
 
 function getSpeechRecognitionCtor(): (new () => any) | null {
   if (typeof window === 'undefined') return null
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   const w = window as any
   return w.SpeechRecognition || w.webkitSpeechRecognition || null
 }
@@ -81,8 +81,8 @@ const browserVoiceProvider: VoiceProvider = {
       let interim = ''
       let final = ''
       for (let i = e.resultIndex; i < e.results.length; i++) {
-        const result = e.results[i]!
-        const text = result[0]!.transcript
+        const result = e.results[i]
+        const text = result[0].transcript
         if (result.isFinal) final += (final ? ' ' : '') + text.trim()
         else interim += text
       }

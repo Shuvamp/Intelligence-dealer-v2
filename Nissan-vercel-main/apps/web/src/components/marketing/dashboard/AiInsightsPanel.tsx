@@ -25,12 +25,12 @@ function buildInsights(posts: Array<InstagramPostInsight>, bestCampaign: { name:
     .sort((a, b) => b.avg - a.avg)
   if (avgByType.length >= 2) {
     const [top, ...rest] = avgByType
-    const worst = rest[rest.length - 1]!
-    const multiplier = worst.avg > 0 ? (top!.avg / worst.avg).toFixed(1) : null
+    const worst = rest[rest.length - 1]
+    const multiplier = worst.avg > 0 ? (top.avg / worst.avg).toFixed(1) : null
     out.push(
       multiplier
-        ? `${top!.label} get ${multiplier}x more engagement (likes + comments) per post than ${worst.label.toLowerCase()} this period.`
-        : `${top!.label} are your best-performing content type this period.`,
+        ? `${top.label} get ${multiplier}x more engagement (likes + comments) per post than ${worst.label.toLowerCase()} this period.`
+        : `${top.label} are your best-performing content type this period.`,
     )
   }
 

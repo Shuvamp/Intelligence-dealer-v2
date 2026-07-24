@@ -4,8 +4,8 @@ import {
   LineChart, Line, PieChart, Pie, Cell,
 } from 'recharts'
 import { Eye, Heart, MessageCircle, MousePointerClick, Radio, Share2 } from 'lucide-react'
-import type { AnalyticsTrendPoint } from '#/lib/marketing'
-import type { InstagramAudiencePoint, InstagramPostInsight } from '#/lib/marketing'
+import type { AnalyticsTrendPoint, InstagramAudiencePoint, InstagramPostInsight  } from '#/lib/marketing'
+
 import { DashCard, EmptyState, NotTrackedNote, SectionHeader, Segmented, compact } from './shared'
 
 const GRAN = [{ value: 'daily' as const, label: 'Daily' }, { value: 'weekly' as const, label: 'Weekly' }]
@@ -206,7 +206,7 @@ export function BestTimeHeatmap({ posts }: { posts: Array<InstagramPostInsight> 
       // is undefined, and the non-null assertion turned that into a TypeError that
       // blanked the whole dashboard. One bad IG row should just be skipped.
       if (Number.isNaN(d.getTime())) continue
-      grid[d.getUTCDay()]![Math.min(5, Math.floor(d.getUTCHours() / 4))]! += (p.likes ?? 0) + (p.comments ?? 0)
+      grid[d.getUTCDay()][Math.min(5, Math.floor(d.getUTCHours() / 4))] += (p.likes ?? 0) + (p.comments ?? 0)
       seen = true
     }
     const dayIndex = DAYS.indexOf(day)
@@ -214,12 +214,12 @@ export function BestTimeHeatmap({ posts }: { posts: Array<InstagramPostInsight> 
       any: seen,
       rows: BUCKETS.map((b, j) => ({
         label: b.label,
-        engagement: dayIndex === -1 ? grid.reduce((t, row) => t + row[j]!, 0) : grid[dayIndex]![j]!,
+        engagement: dayIndex === -1 ? grid.reduce((t, row) => t + row[j], 0) : grid[dayIndex][j],
       })),
     }
   }, [posts, day])
 
-  const peak = rows.reduce((best, r) => (r.engagement > best.engagement ? r : best), rows[0]!)
+  const peak = rows.reduce((best, r) => (r.engagement > best.engagement ? r : best), rows[0])
 
   return (
     <DashCard className="flex h-full flex-col">
@@ -353,13 +353,13 @@ export function EngagementFunnel({ impressions, reach, likes, comments, leads }:
     { label: 'Shares', value: null, tile: 'bg-[#ECFDF5] text-[#059669]' },
     { label: 'Leads', value: leads, tile: 'bg-[#ECFEFF] text-[#0891B2]' },
   ]
-  const top = steps[0]!.value || 0
+  const top = steps[0].value || 0
   return (
     <DashCard className="flex h-full flex-col">
       <SectionHeader kicker="Funnel" title="Engagement Funnel" />
       <div className="flex flex-1 flex-wrap items-start justify-between gap-y-4">
         {steps.map((s, i) => {
-          const Icon = FUNNEL_ICONS[i]!
+          const Icon = FUNNEL_ICONS[i]
           const tracked = s.value !== null
           const pct = tracked && top ? ((s.value as number) / top) * 100 : null
           return (

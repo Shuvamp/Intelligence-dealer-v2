@@ -223,7 +223,7 @@ function PosterPreview({ vehicle, theme, headline, subheadline, caption, cta, ve
           {cta || 'CTA'}
         </div>
         {vehicleAsset && (
-          <img src={vehicleAsset} alt="" className="h-10 w-10 rounded-[6px] object-cover opacity-60" onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none' }} />
+          <img src={vehicleAsset} alt="" className="h-10 w-10 rounded-[6px] object-cover opacity-60" onError={(e) => { (e.currentTarget).style.display = 'none' }} />
         )}
       </div>
 
@@ -327,7 +327,7 @@ function ContentStudio() {
       ? monthEvents.opportunities.map(eventToItem)
       : campaignDays.filter((d) => d.campaign_id === selectedId).map(dayToItem)
     if (Object.keys(savedStatuses).length === 0) return raw
-    return raw.map((it) => savedStatuses[it.key] ? { ...it, content_status: savedStatuses[it.key]! } : it)
+    return raw.map((it) => savedStatuses[it.key] ? { ...it, content_status: savedStatuses[it.key] } : it)
   }, [isEvents, monthEvents, campaignDays, selectedId, savedStatuses])
 
   const [selectedKey, setSelectedKey] = useState<string | null>(null)
@@ -341,7 +341,7 @@ function ContentStudio() {
   // Keep the selected preview channel valid as connections change.
   useEffect(() => {
     if (availableChannels.length > 0 && !availableChannels.some((c) => c.value === channel)) {
-      setChannel(availableChannels[0]!.value)
+      setChannel(availableChannels[0].value)
     }
   }, [availableChannels, channel])
 
@@ -455,7 +455,7 @@ function ContentStudio() {
   // Auto-select first item when the campaign/source changes
   useEffect(() => {
     if (items.length > 0 && !items.some((i) => i.key === selectedKey)) {
-      loadItem(items[0]!)
+      loadItem(items[0])
     } else if (items.length === 0) {
       setSelectedKey(null)
     }
@@ -1111,7 +1111,7 @@ function ContentStudio() {
                   alt={vehicleAsset.name}
                   loading="lazy"
                   className="h-8 w-8 rounded-[6px] object-cover border border-[#FECDD3] shrink-0"
-                  onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none' }}
+                  onError={(e) => { (e.currentTarget).style.display = 'none' }}
                 />
               ) : (
                 <div className="h-8 w-8 rounded-[6px] bg-[#C3002F]/10 flex items-center justify-center border border-[#FECDD3] shrink-0">
@@ -1555,7 +1555,7 @@ function ContentStudio() {
                   <div className="flex flex-col gap-2">
                     <div className="flex items-center gap-2">
                       {eventVehicleAsset?.file_url && (
-                        <img src={eventVehicleAsset.file_url} alt="" className="h-8 w-8 rounded-[6px] object-cover shrink-0 border border-border" onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none' }} />
+                        <img src={eventVehicleAsset.file_url} alt="" className="h-8 w-8 rounded-[6px] object-cover shrink-0 border border-border" onError={(e) => { (e.currentTarget).style.display = 'none' }} />
                       )}
                       <div className="flex-1">
                         <label className="text-[10px] text-muted-foreground block mb-0.5">Car Photo</label>
@@ -1573,7 +1573,7 @@ function ContentStudio() {
                     </div>
                     <div className="flex items-center gap-2">
                       {eventLogoAsset?.file_url && (
-                        <img src={eventLogoAsset.file_url} alt="" className="h-8 w-8 rounded-[6px] object-contain shrink-0 border border-border bg-white p-0.5" onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none' }} />
+                        <img src={eventLogoAsset.file_url} alt="" className="h-8 w-8 rounded-[6px] object-contain shrink-0 border border-border bg-white p-0.5" onError={(e) => { (e.currentTarget).style.display = 'none' }} />
                       )}
                       <div className="flex-1">
                         <label className="text-[10px] text-muted-foreground block mb-0.5">Logo</label>
@@ -1719,7 +1719,7 @@ function ContentStudio() {
                   return (
                     <button
                       key={ch.value}
-                      onClick={isConn ? () => setChannel(ch.value as PreviewChannel) : undefined}
+                      onClick={isConn ? () => setChannel(ch.value) : undefined}
                       disabled={!isConn}
                       title={isConn ? ch.label : `${ch.label} — not connected`}
                       className="rounded-[8px] px-2.5 py-1 text-[11px] font-semibold transition disabled:opacity-40 disabled:cursor-not-allowed"
@@ -1796,7 +1796,7 @@ function ContentStudio() {
                             {/* Row body — switches preview (connected only) */}
                             <button
                               type="button"
-                              onClick={isConnected ? () => setChannel(ch.value as PreviewChannel) : undefined}
+                              onClick={isConnected ? () => setChannel(ch.value) : undefined}
                               disabled={!isConnected}
                               className="flex items-center gap-2 flex-1 min-w-0 py-2 pr-2.5 text-left disabled:cursor-not-allowed"
                             >

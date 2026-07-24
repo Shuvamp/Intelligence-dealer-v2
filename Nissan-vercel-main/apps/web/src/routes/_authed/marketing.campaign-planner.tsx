@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from 'react'
 import { createFileRoute, useRouter } from '@tanstack/react-router'
 import { getDuckCampaigns, getDuckCampaignDays, getMonthEvents } from '#/lib/marketing'
 import { Zap, ChevronLeft, ChevronRight, Loader2 } from 'lucide-react'
-import type { CampaignDay, CampaignPlanInput, CampaignSummary, MonthPlan } from '#/lib/types'
+import type { CampaignDay, CampaignPlanInput, CampaignPost, CampaignSummary, MonthPlan } from '#/lib/types'
 import { CampaignPlannerWizard } from '#/components/marketing/CampaignPlannerWizard'
 import { MarketingRouteError } from '#/components/marketing/RouteError'
 import { CampaignDetailDialog } from '#/components/marketing/CampaignDetailDialog'
@@ -24,7 +24,7 @@ export const Route = createFileRoute('/_authed/marketing/campaign-planner')({
       getDuckCampaignDays(),
       getMonthEvents({ data: { month: currentMonth, year: currentYear } }),
     ])
-    return { campaigns, campaignDays, calendar: [] as import('#/lib/types').CampaignPost[], monthPlan, currentMonth, currentYear }
+    return { campaigns, campaignDays, calendar: [] as CampaignPost[], monthPlan, currentMonth, currentYear }
   },
   component: CampaignPlanner,
   errorComponent: ({ reset }) => <MarketingRouteError title="Could not load the campaign planner" reset={reset} />,
@@ -59,7 +59,7 @@ interface CalEvent {
 function parseLocalDate(iso: string | Date) {
   if (iso instanceof Date) return new Date(iso.getFullYear(), iso.getMonth(), iso.getDate())
   const [y, m, d] = iso.substring(0, 10).split('-').map(Number)
-  return new Date(y!, m! - 1, d!)
+  return new Date(y, m - 1, d)
 }
 
 // ── Constants ─────────────────────────────────────────────────────────────────
