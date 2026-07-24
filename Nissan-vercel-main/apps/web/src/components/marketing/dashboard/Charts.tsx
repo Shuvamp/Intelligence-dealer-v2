@@ -202,6 +202,10 @@ export function BestTimeHeatmap({ posts }: { posts: Array<InstagramPostInsight> 
     for (const p of posts) {
       if (!p.at) continue
       const d = new Date(p.at)
+      // A malformed timestamp gives Invalid Date → getUTCDay() is NaN → grid[NaN]
+      // is undefined, and the non-null assertion turned that into a TypeError that
+      // blanked the whole dashboard. One bad IG row should just be skipped.
+      if (Number.isNaN(d.getTime())) continue
       grid[d.getUTCDay()]![Math.min(5, Math.floor(d.getUTCHours() / 4))]! += (p.likes ?? 0) + (p.comments ?? 0)
       seen = true
     }

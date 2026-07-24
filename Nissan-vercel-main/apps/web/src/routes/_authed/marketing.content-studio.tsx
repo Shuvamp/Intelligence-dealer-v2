@@ -16,6 +16,8 @@ import type {
   ChannelConnection,
 } from '#/lib/types'
 import { cn } from '#/lib/utils'
+import { MarketingRouteError } from '#/components/marketing/RouteError'
+import { to12hDisplay, parse12hInput } from '#/components/marketing/time12h'
 
 function ContentStudioSkeleton() {
   return (
@@ -56,6 +58,7 @@ export const Route = createFileRoute('/_authed/marketing/content-studio')({
   },
   pendingComponent: ContentStudioSkeleton,
   component: ContentStudio,
+  errorComponent: ({ reset }) => <MarketingRouteError title="Could not load the content studio" reset={reset} />,
 })
 
 // Preview channel keys. `value` matches the ChannelConnection.channel strings
@@ -233,35 +236,8 @@ function PosterPreview({ vehicle, theme, headline, subheadline, caption, cta, ve
   )
 }
 
-function to12hDisplay(val: string): string {
-  const parts = (val || '10:00').split(':').map(Number)
-  const h24 = parts[0] ?? 10
-  const mm = String(parts[1] ?? 0).padStart(2, '0')
-  const ampm = h24 < 12 ? 'AM' : 'PM'
-  const h12 = String(h24 % 12 || 12).padStart(2, '0')
-  return `${h12}:${mm} ${ampm}`
-}
-
-function parse12hInput(raw: string): string | null {
-  const s = raw.trim().toUpperCase()
-  const m12 = s.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/)
-  if (m12) {
-    let h = parseInt(m12[1]!, 10)
-    const mm = parseInt(m12[2]!, 10)
-    if (h < 1 || h > 12 || mm < 0 || mm > 59) return null
-    if (m12[3] === 'AM' && h === 12) h = 0
-    if (m12[3] === 'PM' && h !== 12) h += 12
-    return `${String(h).padStart(2, '0')}:${String(mm).padStart(2, '0')}`
-  }
-  const m24 = s.match(/^(\d{1,2}):(\d{2})$/)
-  if (m24) {
-    const h = parseInt(m24[1]!, 10)
-    const mm = parseInt(m24[2]!, 10)
-    if (h < 0 || h > 23 || mm < 0 || mm > 59) return null
-    return `${String(h).padStart(2, '0')}:${String(mm).padStart(2, '0')}`
-  }
-  return null
-}
+// to12hDisplay / parse12hInput moved to #/components/marketing/time12h — this
+// file had a byte-for-byte copy of the wizard's. See M4.
 
 // Per-field AI suggest button (small sparkles icon next to a label).
 function SuggestButton({ busy, onClick, title }: { busy: boolean; onClick: () => void; title?: string }) {
@@ -291,6 +267,14 @@ function campaignAssetUrls(camp: CampaignSummary | null | undefined, vehicle?: s
     ...assets.filter((a) => a.vehicle === vehicle),
     ...assets.filter((a) => a.vehicle !== vehicle),
   ].map((a) => a.file_url!)
+}
+
+// Errors thrown out of lib/marketing.ts carry raw Supabase/Postgres text (table,
+// constraint and policy names) and FastAPI internals — those used to be rendered
+// straight into the error banner. Log the real cause, show a fixed string.
+function reportError(scope: string, e: unknown, message: string): string {
+  console.error(`[content-studio] ${scope}`, e)
+  return message
 }
 
 function ContentStudio() {
@@ -612,7 +596,7 @@ function ContentStudio() {
       if (!res.ai) setError('AI quota reached — template content used. Edit it or retry later.')
       await router.invalidate()
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Generation failed')
+      setError(reportError('generate', e, 'Could not generate content — please try again.'))
     } finally {
       setGenLoading(false)
     }
@@ -639,7 +623,7 @@ function ContentStudio() {
       // Update sidebar badge instantly without reloading all 4 loaders.
       setSavedStatuses(prev => ({ ...prev, [selectedItem.key]: newStatus }))
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Save failed')
+      setError(reportError('save', e, 'Could not save — please try again.'))
     } finally {
       setSaveLoading(false)
     }
@@ -657,7 +641,7 @@ function ContentStudio() {
       await approveCampaign({ data: { campaign_id: selectedCampaign.id } })
       await router.navigate({ to: '/marketing/publishing' })
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Approve failed')
+      setError(reportError('approve campaign', e, 'Could not approve the campaign — please try again.'))
       setApproving(false)
     }
   }
@@ -712,7 +696,7 @@ function ContentStudio() {
       setPosterCache(prev => ({ ...prev, [key]: displayUrl }))
       await router.invalidate()
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Poster generation failed')
+      setError(reportError('generate poster', e, 'Could not generate the poster — please try again.'))
     } finally {
       generatingKeysRef.current.delete(key)
       setGeneratingKeys(prev => { const n = new Set(prev); n.delete(key); return n })
@@ -755,7 +739,7 @@ function ContentStudio() {
       setPosterCache(prev => ({ ...prev, [key]: displayUrl }))
       await router.invalidate()
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Poster upload failed')
+      setError(reportError('upload poster', e, 'Could not upload the poster — please try again.'))
     } finally {
       setPosterUploading(prev => { const n = new Set(prev); n.delete(key); return n })
     }
@@ -786,7 +770,7 @@ function ContentStudio() {
       })
       setVideoCache(prev => ({ ...prev, [key]: video_url }))
     } catch (e) {
-      setVideoError(e instanceof Error ? e.message : 'Video upload failed')
+      setVideoError(reportError('upload video', e, 'Could not upload the video — please try again.'))
     } finally {
       setVideoUploading(prev => { const n = new Set(prev); n.delete(key); return n })
     }
@@ -807,7 +791,7 @@ function ContentStudio() {
       })
       setVideoCache(prev => { const n = { ...prev }; delete n[key]; return n })
     } catch (e) {
-      setVideoError(e instanceof Error ? e.message : 'Could not remove video')
+      setVideoError(reportError('remove video', e, 'Could not remove the video — please try again.'))
     }
   }
 
@@ -842,7 +826,7 @@ function ContentStudio() {
       setRefineText('')
       await router.invalidate()
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Poster refine failed')
+      setError(reportError('refine poster', e, 'Could not refine the poster — please try again.'))
     } finally {
       setRefining(false)
     }
@@ -858,7 +842,7 @@ function ContentStudio() {
       await approveEvent({ data: { id: selectedItem.event_id!, post_time: eventTime } })
       await router.navigate({ to: '/marketing/publishing' })
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Approve failed')
+      setError(reportError('approve event', e, 'Could not approve the event — please try again.'))
       setApproving(false)
     }
   }
@@ -1218,10 +1202,15 @@ function ContentStudio() {
                   Publish Channels
                 </label>
 
-                {/* Trigger */}
-                <button
-                  type="button"
+                {/* Trigger — a div[role=button], not a real <button>, because it
+                    contains the removable channel chips (real buttons). A button
+                    can't hold interactive descendants; browsers reparent them and
+                    the chips became unclickable/unreachable. */}
+                <div
+                  role="button"
+                  tabIndex={0}
                   onClick={() => setChannelMenuOpen((o) => !o)}
+                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setChannelMenuOpen((o) => !o) } }}
                   aria-haspopup="listbox"
                   aria-expanded={channelMenuOpen}
                   className={cn(
@@ -1245,16 +1234,15 @@ function ContentStudio() {
                             {ch.label.charAt(0)}
                           </span>
                           {ch.label}
-                          <span
-                            role="button"
-                            tabIndex={0}
+                          <button
+                            type="button"
                             title={`Remove ${ch.label}`}
+                            aria-label={`Remove ${ch.label}`}
                             onClick={(e) => { e.stopPropagation(); togglePublishChannel(ch.value) }}
-                            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); togglePublishChannel(ch.value) } }}
                             className="grid h-3.5 w-3.5 place-items-center rounded-full hover:bg-white/30 transition"
                           >
                             <XIcon className="h-2.5 w-2.5" />
-                          </span>
+                          </button>
                         </span>
                       ))
                     )}
@@ -1265,7 +1253,7 @@ function ContentStudio() {
                   <ChevronDown
                     className={cn('h-4 w-4 shrink-0 text-muted-foreground transition-transform', channelMenuOpen && 'rotate-180')}
                   />
-                </button>
+                </div>
 
                 {/* Menu */}
                 {channelMenuOpen && (
@@ -1300,12 +1288,21 @@ function ContentStudio() {
                         const isConnected = conn?.status === 'connected'
                         const checked = selectedChannels.includes(ch.value)
                         return (
-                          <li key={ch.value} role="option" aria-selected={checked}>
+                          // The option itself carries the interaction. It used to
+                          // wrap a separate role="button" div — a nested interactive
+                          // inside role="option", which screen readers announce as
+                          // garbage and keyboard users can't reach. Connected → the
+                          // <li> is the control; not connected → inert <li> holding
+                          // the Connect link, so the two states never nest.
+                          <li
+                            key={ch.value}
+                            role="option"
+                            aria-selected={checked}
+                            tabIndex={isConnected ? 0 : undefined}
+                            onClick={isConnected ? () => { togglePublishChannel(ch.value); setChannel(ch.value) } : undefined}
+                            onKeyDown={isConnected ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); togglePublishChannel(ch.value); setChannel(ch.value) } } : undefined}
+                          >
                             <div
-                              role={isConnected ? 'button' : undefined}
-                              tabIndex={isConnected ? 0 : undefined}
-                              onClick={isConnected ? () => { togglePublishChannel(ch.value); setChannel(ch.value) } : undefined}
-                              onKeyDown={isConnected ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); togglePublishChannel(ch.value); setChannel(ch.value) } } : undefined}
                               className={cn(
                                 'flex items-center gap-3 px-3 py-2.5 mx-1 rounded-[10px] select-none transition',
                                 isConnected ? 'cursor-pointer hover:bg-muted/40' : 'cursor-default',

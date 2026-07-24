@@ -26,6 +26,9 @@ import type {
   SelectedAsset,
   YouTubeStatus,
 } from './types'
+// Type-only — erased at compile time, so the native duckdb module is still only
+// ever reached through the existing dynamic import()s. See M3.
+import type { DuckCampaignRow } from './analytics.duckdb'
 
 const FASTAPI_URL = (() => {
   const raw = (
@@ -46,6 +49,44 @@ const POSTER_PUBLIC_URL = (() => {
   const trimmed = raw.replace(/\/$/, '')
   return /^https?:\/\//.test(trimmed) ? trimmed : `https://${trimmed}`
 })()
+
+// ── SSRF guard for server-side image fetches ────────────────────────────────
+// generatePosterImage fetches image URLs (car photos, logos, a base poster to
+// refine) that arrive from the client, then ships the bytes to Gemini. With no
+// host allow-list an attacker could point those at cloud metadata
+// (169.254.169.254), an internal service, or localhost and exfiltrate the
+// response into a poster. Only our own storage + backend origins are ever legit:
+// Supabase Storage (assets/logos), FastAPI (dev asset serving), and the public
+// poster host (refine's base_poster_url is a persisted poster URL).
+const FETCH_ALLOWED_HOSTS: ReadonlySet<string> = new Set(
+  [
+    (import.meta.env.VITE_SUPABASE_URL as string | undefined) ?? '',
+    FASTAPI_URL,
+    POSTER_PUBLIC_URL,
+  ]
+    .map((u) => {
+      try { return new URL(u).host } catch { return '' }
+    })
+    .filter(Boolean),
+)
+
+// Throws unless `raw` is an http(s) URL on an allow-listed host. Callers invoke
+// this immediately before fetch(); the existing per-image try/catch then treats a
+// blocked URL like any other failed fetch (skip the image / fail the refine).
+function assertAllowedImageUrl(raw: string): void {
+  let url: URL
+  try {
+    url = new URL(raw)
+  } catch {
+    throw new Error('Invalid image URL')
+  }
+  if (url.protocol !== 'https:' && url.protocol !== 'http:') {
+    throw new Error(`Refusing to fetch non-HTTP(S) URL: ${url.protocol}`)
+  }
+  if (!FETCH_ALLOWED_HOSTS.has(url.host)) {
+    throw new Error(`Refusing to fetch image from disallowed host: ${url.host}`)
+  }
+}
 
 const DEFAULT_CHANNELS = ['Instagram', 'Facebook', 'X']
 
@@ -303,12 +344,29 @@ export const getMarketingAnalytics = createServerFn({ method: 'GET' })
     const endIso = end.toISOString()
     const inRange = (iso?: string | null) => !!iso && iso >= startIso && iso <= endIso
 
+    // campaign_posts used to be fetched whole — every post the tenant has ever
+    // had, on every dashboard load, twice (current + comparison period), only
+    // to be thrown away by inRange() below. Push the same window into Postgres.
+    // The OR mirrors the JS predicate exactly: every consumer of `posts` keeps a
+    // row when either created_at or published_at lands in range, so narrowing on
+    // one column alone would drop rows that currently count.
+    const postWindow =
+      `and(created_at.gte."${startIso}",created_at.lte."${endIso}"),` +
+      `and(published_at.gte."${startIso}",published_at.lte."${endIso}")`
     const [campsRes, insRes, postsRes, leadsRes] = await Promise.all([
+      // Deliberately unbounded: totals.campaigns is an all-time count, and this
+      // also backs the campaign-name lookup for insights older than the window.
       supabase.from('campaigns').select('id, name, status, channels'),
       supabase.from('campaign_insights').select('*').gte('captured_at', startIso).lte('captured_at', endIso),
-      supabase.from('campaign_posts').select('id, title, campaign_id, channel, status, published_at, created_at, vehicle'),
+      supabase.from('campaign_posts')
+        .select('id, title, campaign_id, channel, status, published_at, created_at, vehicle')
+        .or(postWindow),
       supabase.from('leads').select('id, created_at').gte('created_at', startIso).lte('created_at', endIso),
     ])
+    // This result's error was never inspected — a rejected query just produced an
+    // empty post list and a silently blank Channel Performance / Recent Activity.
+    // Still non-fatal (unchanged behavior), but no longer invisible.
+    if (postsRes.error) console.error('[getMarketingAnalytics] campaign_posts query failed:', postsRes.error)
 
     const camps = (campsRes.data ?? []) as Array<{ id: string; name: string; status: string; channels: string[] | null }>
     const nameById = new Map(camps.map((c) => [c.id, c.name]))
@@ -709,6 +767,54 @@ export const refreshInstagramAnalytics = createServerFn({ method: 'POST' }).hand
   },
 )
 
+// Shared DuckDB row → CampaignSummary mapping. getCampaigns and getDuckCampaigns
+// carried byte-identical copies of this block; the only difference is where the
+// post counts come from (getCampaigns cross-queries live Supabase campaign_posts,
+// getDuckCampaigns uses the row's own aggregate columns), so those are a param.
+// The DuckCampaignRow import is type-only and erased at compile time — the native
+// duckdb module stays out of the module graph exactly as before. See M3.
+function duckRowToCampaign(
+  r: DuckCampaignRow,
+  counts: { postCount: number; publishedCount: number },
+): CampaignSummary {
+  const parsedAssets: SelectedAsset[] = r.selected_assets
+    ? (() => { try { return JSON.parse(r.selected_assets as string) } catch { return [] } })()
+    : []
+  const parsedLogo: SelectedAsset | null = r.selected_logo
+    ? (() => { try { return JSON.parse(r.selected_logo as string) } catch { return null } })()
+    : null
+  const parsedLogo2: SelectedAsset | null = r.selected_logo_2
+    ? (() => { try { return JSON.parse(r.selected_logo_2 as string) } catch { return null } })()
+    : null
+  return {
+    id: r.campaign_id,
+    tenant_id: r.tenant_id,
+    location_id: null,
+    name: r.name,
+    theme: r.theme ?? null,
+    objective: (r.objective as CampaignObjective) ?? 'awareness',
+    status: (r.status as CampaignStatus) ?? 'draft',
+    channels: (r.channels as string[] | null) ?? [],
+    start_date: toDateStr(r.start_date),
+    end_date: toDateStr(r.end_date),
+    budget: null,
+    color: r.campaign_color ?? null,
+    campaign_hashtags: (r.campaign_hashtags as string[] | null) ?? [],
+    created_at: '',
+    updated_at: '',
+    postCount: counts.postCount,
+    publishedCount: counts.publishedCount,
+    selected_assets: parsedAssets,
+    selected_logo: parsedLogo,
+    selected_logo_2: parsedLogo2,
+    vehicles: parsedAssets.length > 0
+      ? [...new Set(parsedAssets.map((a) => a.vehicle))]
+      : (r.vehicle ? (r.vehicle as string).split(',').filter(Boolean) : []),
+    posting_time: r.posting_time ?? null,
+    goal: r.goal ?? null,
+  }
+}
+
 // getCampaigns: primary source is DuckDB (where Campaign Planner writes),
 // with live post counts cross-queried from Supabase campaign_posts.
 export const getCampaigns = createServerFn({ method: 'GET' }).handler(
@@ -722,48 +828,24 @@ export const getCampaigns = createServerFn({ method: 'GET' }).handler(
       .select('campaign_id, status')
     const byId = (postRows ?? []) as Array<{ campaign_id: string | null; status: PostStatus }>
 
+    // Index the posts once. The old code ran two byId.filter() passes per
+    // campaign (O(n·m)); this produces the same numbers in one pass. The key is
+    // kept nullable so a null campaign_id groups exactly as the old === did. M3.
+    const countIndex = new Map<string | null, { postCount: number; publishedCount: number }>()
+    for (const p of byId) {
+      const entry = countIndex.get(p.campaign_id) ?? { postCount: 0, publishedCount: 0 }
+      entry.postCount += 1
+      if (p.status === 'published') entry.publishedCount += 1
+      countIndex.set(p.campaign_id, entry)
+    }
+    const countsFor = (id: string | null) =>
+      countIndex.get(id) ?? { postCount: 0, publishedCount: 0 }
+
     try {
       const { listCampaigns } = await import('./analytics.duckdb')
       const rows = await listCampaigns(tenantId)
       if (rows.length > 0) {
-        return rows.map((r) => {
-          const parsedAssets: SelectedAsset[] = r.selected_assets
-            ? (() => { try { return JSON.parse(r.selected_assets as string) } catch { return [] } })()
-            : []
-          const parsedLogo: SelectedAsset | null = r.selected_logo
-            ? (() => { try { return JSON.parse(r.selected_logo as string) } catch { return null } })()
-            : null
-          const parsedLogo2: SelectedAsset | null = r.selected_logo_2
-            ? (() => { try { return JSON.parse(r.selected_logo_2 as string) } catch { return null } })()
-            : null
-          return {
-            id: r.campaign_id,
-            tenant_id: r.tenant_id,
-            location_id: null,
-            name: r.name,
-            theme: r.theme ?? null,
-            objective: (r.objective as CampaignObjective) ?? 'awareness',
-            status: (r.status as CampaignStatus) ?? 'draft',
-            channels: (r.channels as string[] | null) ?? [],
-            start_date: toDateStr(r.start_date),
-            end_date: toDateStr(r.end_date),
-            budget: null,
-            color: r.campaign_color ?? null,
-            campaign_hashtags: (r.campaign_hashtags as string[] | null) ?? [],
-            created_at: '',
-            updated_at: '',
-            postCount: byId.filter((p) => p.campaign_id === r.campaign_id).length,
-            publishedCount: byId.filter((p) => p.campaign_id === r.campaign_id && p.status === 'published').length,
-            selected_assets: parsedAssets,
-            selected_logo: parsedLogo,
-            selected_logo_2: parsedLogo2,
-            vehicles: parsedAssets.length > 0
-              ? [...new Set(parsedAssets.map((a) => a.vehicle))]
-              : (r.vehicle ? (r.vehicle as string).split(',').filter(Boolean) : []),
-            posting_time: r.posting_time ?? null,
-            goal: r.goal ?? null,
-          }
-        })
+        return rows.map((r) => duckRowToCampaign(r, countsFor(r.campaign_id)))
       }
     } catch { /* fall through to Supabase */ }
 
@@ -772,8 +854,7 @@ export const getCampaigns = createServerFn({ method: 'GET' }).handler(
       .from('campaigns').select('*').order('created_at', { ascending: false })
     return (camps ?? []).map((c: any) => ({
       ...c,
-      postCount: byId.filter((p) => p.campaign_id === c.id).length,
-      publishedCount: byId.filter((p) => p.campaign_id === c.id && p.status === 'published').length,
+      ...countsFor(c.id),
     }))
   },
 )
@@ -788,44 +869,9 @@ export const getDuckCampaigns = createServerFn({ method: 'GET' }).handler(
       if (!tenantId) return []
       const { listCampaigns } = await import('./analytics.duckdb')
       const rows = await listCampaigns(tenantId)
-      return rows.map((r) => {
-        const parsedAssets: SelectedAsset[] = r.selected_assets
-          ? (() => { try { return JSON.parse(r.selected_assets as string) } catch { return [] } })()
-          : []
-        const parsedLogo: SelectedAsset | null = r.selected_logo
-          ? (() => { try { return JSON.parse(r.selected_logo as string) } catch { return null } })()
-          : null
-        const parsedLogo2: SelectedAsset | null = r.selected_logo_2
-          ? (() => { try { return JSON.parse(r.selected_logo_2 as string) } catch { return null } })()
-          : null
-        return {
-          id: r.campaign_id,
-          tenant_id: r.tenant_id,
-          location_id: null,
-          name: r.name,
-          theme: r.theme ?? null,
-          objective: (r.objective as CampaignObjective) ?? 'awareness',
-          status: (r.status as CampaignStatus) ?? 'draft',
-          channels: (r.channels as string[] | null) ?? [],
-          start_date: toDateStr(r.start_date),
-          end_date: toDateStr(r.end_date),
-          budget: null,
-          color: r.campaign_color ?? null,
-          campaign_hashtags: (r.campaign_hashtags as string[] | null) ?? [],
-          created_at: '',
-          updated_at: '',
-          postCount: r.post_count,
-          publishedCount: r.published_count,
-          selected_assets: parsedAssets,
-          selected_logo: parsedLogo,
-          selected_logo_2: parsedLogo2,
-          vehicles: parsedAssets.length > 0
-            ? [...new Set(parsedAssets.map((a) => a.vehicle))]
-            : (r.vehicle ? (r.vehicle as string).split(',').filter(Boolean) : []),
-          posting_time: r.posting_time ?? null,
-          goal: r.goal ?? null,
-        }
-      })
+      return rows.map((r) =>
+        duckRowToCampaign(r, { postCount: r.post_count, publishedCount: r.published_count }),
+      )
     } catch {
       return []
     }
@@ -1143,7 +1189,7 @@ import type { ChannelConnection, LinkedInProfileResult } from './types'
 async function queryAssets(
   supabase: ReturnType<typeof getSupabaseServerClient>,
   tenantId: string,
-  filters: { asset_type?: string; vehicle?: string; search?: string; trashed?: boolean },
+  filters: { asset_type?: string; vehicle?: string; search?: string; trashed?: boolean; campaign_selected?: boolean },
 ): Promise<Array<MediaAsset>> {
   let query = supabase
     .from('marketing_assets')
@@ -1154,14 +1200,29 @@ async function queryAssets(
   query = filters.trashed ? query.not('deleted_at', 'is', null) : query.is('deleted_at', null)
   if (filters.asset_type) query = query.eq('asset_type', filters.asset_type)
   if (filters.vehicle) query = query.eq('vehicle', filters.vehicle)
-  if (filters.search) query = query.ilike('name', `%${filters.search}%`)
+  // Escape LIKE wildcards so a literal % or _ (or \) typed in the search box
+  // matches literally instead of acting as a pattern. Postgres ILIKE uses \ as
+  // its default escape char; the wrapping %…% stay as the actual wildcards.
+  if (filters.search) {
+    const term = filters.search.replace(/[\\%_]/g, (c) => `\\${c}`)
+    query = query.ilike('name', `%${term}%`)
+  }
+  // Only `true` narrows. campaign_selected is nullable, so testing equality
+  // against false would silently drop every row that has never been picked.
+  if (filters.campaign_selected) query = query.eq('campaign_selected', true)
   const { data, error } = await query
-  if (error) throw new Error(`Failed to list assets: ${error.message}`)
+  // Raw PostgREST text names tables, constraints and RLS policies, and these
+  // messages are rendered verbatim in the UI — log the detail, return a stable
+  // user-facing string. Same pattern as uploadAsset. See S4.
+  if (error) {
+    console.error('[marketing] listAssets failed', error)
+    throw new Error('Could not load assets — please try again.')
+  }
   return (data ?? []) as Array<MediaAsset>
 }
 
 export const getMediaAssets = createServerFn({ method: 'GET' })
-  .validator((d: { asset_type?: string; vehicle?: string; search?: string; trashed?: boolean } | undefined) => d ?? {})
+  .validator((d: { asset_type?: string; vehicle?: string; search?: string; trashed?: boolean; campaign_selected?: boolean } | undefined) => d ?? {})
   .handler(async ({ data }): Promise<Array<MediaAsset>> => {
     const supabase = getSupabaseServerClient()
     const { tenantId } = await authCtx(supabase)
@@ -1184,9 +1245,22 @@ export const setAssetTrashed = createServerFn({ method: 'POST' })
       )
       .in('id', data.assetIds)
       .eq('tenant_id', tenantId)
-    if (error) throw new Error(`Failed to update trash: ${error.message}`)
+    if (error) {
+      console.error('[marketing] trash update failed', error)
+      throw new Error('Could not update trash — please try again.')
+    }
     return { ok: true }
   })
+
+// Upload limits. This is the enforcement point — the media-library client checks
+// the same two values first, but only so the user gets immediate feedback.
+// The ext also picks the stored Content-Type, so an unknown ext used to be stored
+// as image/jpeg: a video or PDF went into a public bucket mislabelled as an image.
+// SVG is excluded deliberately — it is an active document, not a picture.
+const UPLOAD_CONTENT_TYPE: Record<string, string> = {
+  png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp', gif: 'image/gif',
+}
+const MAX_UPLOAD_BYTES = 15 * 1024 * 1024
 
 export const uploadAsset = createServerFn({ method: 'POST' })
   .validator((d: {
@@ -1198,20 +1272,22 @@ export const uploadAsset = createServerFn({ method: 'POST' })
     const supabase = getSupabaseServerClient()
     const { tenantId } = await authCtx(supabase)
     const { randomUUID } = await import('node:crypto')
-    const ext = (data.filename.split('.').pop() ?? 'jpg').toLowerCase()
+    const ext = (data.filename.split('.').pop() ?? '').toLowerCase()
+    const contentType = UPLOAD_CONTENT_TYPE[ext]
+    if (!contentType) throw new Error('Unsupported file type — upload a PNG, JPG, WEBP or GIF image.')
     const bytes = Buffer.from(data.file_b64, 'base64')
+    if (bytes.length > MAX_UPLOAD_BYTES) throw new Error('File is too large — the limit is 15MB.')
 
     const objectPath = `${tenantId}/${randomUUID()}.${ext}`
-    const contentType =
-      ext === 'png' ? 'image/png'
-      : ext === 'webp' ? 'image/webp'
-      : ext === 'svg' ? 'image/svg+xml'
-      : ext === 'gif' ? 'image/gif'
-      : 'image/jpeg'
     const { error: upErr } = await supabase.storage
       .from('media')
       .upload(objectPath, bytes, { contentType, upsert: false })
-    if (upErr) throw new Error(`Upload failed: ${upErr.message}`)
+    // AssetUploadDialog renders err.message verbatim, so the Supabase/Postgres text
+    // (bucket, table, constraint and policy names) stays server-side.
+    if (upErr) {
+      console.error('[marketing] asset storage upload failed', upErr)
+      throw new Error('Upload failed — please try again.')
+    }
     const fileUrl = supabase.storage.from('media').getPublicUrl(objectPath).data.publicUrl
 
     const { data: row, error: insErr } = await supabase
@@ -1224,7 +1300,10 @@ export const uploadAsset = createServerFn({ method: 'POST' })
       })
       .select('*')
       .single()
-    if (insErr) throw new Error(`Failed to save asset: ${insErr.message}`)
+    if (insErr) {
+      console.error('[marketing] asset row insert failed', insErr)
+      throw new Error('Could not save the asset — please try again.')
+    }
     return row as MediaAsset
   })
 
@@ -1233,24 +1312,35 @@ export const deleteAsset = createServerFn({ method: 'POST' })
   .handler(async ({ data }): Promise<{ ok: true }> => {
     const supabase = getSupabaseServerClient()
     const { tenantId } = await authCtx(supabase)
-    // Remove the underlying Storage object (best-effort; the DB row removal
-    // below is the source of truth). File URLs are of the form
-    // .../object/public/media/<objectPath>.
-    try {
-      const marker = '/media/'
-      const idx = data.file_url.indexOf(marker)
-      if (idx !== -1) {
-        await supabase.storage.from('media').remove([data.file_url.slice(idx + marker.length)])
-      }
-    } catch {
-      /* best-effort */
-    }
-    const { error } = await supabase
+    // Delete the DB row first (tenant-scoped) and read back its own file_url, so
+    // the Storage object path is derived from OUR record — never the client-supplied
+    // data.file_url, which a caller could point at another tenant's object. No
+    // .single(): a delete matching zero rows returns [] (idempotent), not an error.
+    const { data: rows, error } = await supabase
       .from('marketing_assets')
       .delete()
       .eq('id', data.assetId)
       .eq('tenant_id', tenantId)
-    if (error) throw new Error(`Failed to delete asset: ${error.message}`)
+      .select('file_url')
+    if (error) {
+      console.error('[marketing] asset delete failed', error)
+      throw new Error('Could not delete the asset — please try again.')
+    }
+    // Remove the underlying Storage object (best-effort; the row removal above is
+    // the source of truth). File URLs are of the form
+    // .../object/public/media/<objectPath>.
+    const fileUrl = rows.length > 0 ? (rows[0].file_url as string | undefined) : undefined
+    if (fileUrl) {
+      try {
+        const marker = '/media/'
+        const idx = fileUrl.indexOf(marker)
+        if (idx !== -1) {
+          await supabase.storage.from('media').remove([fileUrl.slice(idx + marker.length)])
+        }
+      } catch {
+        /* best-effort */
+      }
+    }
     return { ok: true }
   })
 
@@ -1269,7 +1359,10 @@ export const setAssetCampaignSelected = createServerFn({ method: 'POST' })
       })
       .eq('id', data.assetId)
       .eq('tenant_id', tenantId)
-    if (error) throw new Error(`Failed to update selection: ${error.message}`)
+    if (error) {
+      console.error('[marketing] campaign selection update failed', error)
+      throw new Error('Could not update the selection — please try again.')
+    }
     return { ok: true }
   })
 
@@ -1363,7 +1456,7 @@ export const disconnectInstagram = createServerFn({ method: 'POST' })
       return result as { status: string; message: string }
     } catch (e) {
       console.error('[disconnectInstagram] Error:', e)
-      throw new Error(`Failed to disconnect Instagram: ${e instanceof Error ? e.message : String(e)}`)
+      throw new Error('Could not disconnect Instagram — please try again.')
     }
   },
 )
@@ -1435,7 +1528,7 @@ export const disconnectLinkedIn = createServerFn({ method: 'POST' }).handler(
       }
       return response.json() as Promise<{ status: string; message: string }>
     } catch (e) {
-      throw new Error(`Failed to disconnect LinkedIn: ${e instanceof Error ? e.message : String(e)}`)
+      throw new Error('Could not disconnect LinkedIn — please try again.')
     }
   },
 )
@@ -1481,7 +1574,7 @@ export const disconnectYouTube = createServerFn({ method: 'POST' }).handler(
       }
       return response.json() as Promise<{ status: string; message: string }>
     } catch (e) {
-      throw new Error(`Failed to disconnect YouTube: ${e instanceof Error ? e.message : String(e)}`)
+      throw new Error('Could not disconnect YouTube — please try again.')
     }
   },
 )
@@ -1509,7 +1602,7 @@ export const disconnectFacebook = createServerFn({ method: 'POST' }).handler(
       }
       return response.json() as Promise<{ status: string; message: string }>
     } catch (e) {
-      throw new Error(`Failed to disconnect Facebook: ${e instanceof Error ? e.message : String(e)}`)
+      throw new Error('Could not disconnect Facebook — please try again.')
     }
   },
 )
@@ -1548,7 +1641,7 @@ export const disconnectWhatsApp = createServerFn({ method: 'POST' }).handler(
       }
       return response.json() as Promise<{ status: string; message: string }>
     } catch (e) {
-      throw new Error(`Failed to disconnect WhatsApp: ${e instanceof Error ? e.message : String(e)}`)
+      throw new Error('Could not disconnect WhatsApp — please try again.')
     }
   },
 )
@@ -1675,8 +1768,14 @@ export const publishGroupToConnected = createServerFn({ method: 'POST' })
           body: JSON.stringify(body),
         })
         if (!res.ok) {
+          // The raw body can carry FastAPI tracebacks, file paths and Supabase
+          // text, and this string is rendered verbatim in the publish banner —
+          // log it, surface the status code only. See S4.
           const detail = await res.text().catch(() => res.statusText)
-          for (const plat of data.platforms) bump(plat, 'error', `Publish API ${res.status}: ${detail}`)
+          console.error('[marketing] publish API error', res.status, detail)
+          for (const plat of data.platforms) {
+            bump(plat, 'error', `Publish failed (${res.status}) — please try again.`)
+          }
           continue
         }
         const json = (await res.json()) as PublishResult
@@ -1685,8 +1784,12 @@ export const publishGroupToConnected = createServerFn({ method: 'POST' })
           bump(plat, key, r.error ?? r.reason ?? null)
         }
       } catch (e) {
-        const msg = e instanceof Error ? e.message : 'Network error reaching publish API'
-        for (const plat of data.platforms) bump(plat, 'error', msg)
+        // e.message here is transport-level (e.g. "ECONNREFUSED 127.0.0.1:8000")
+        // and leaks the internal backend host/port to the browser.
+        console.error('[marketing] publish API unreachable', e)
+        for (const plat of data.platforms) {
+          bump(plat, 'error', 'Could not reach the publish service — please try again.')
+        }
       }
     }
 
@@ -2200,6 +2303,7 @@ export const generatePosterImage = createServerFn({ method: 'POST' })
     if (mode === 'refine' && data.base_poster_url) {
       // Refine: the input image is the EXISTING poster (served by FastAPI).
       try {
+        assertAllowedImageUrl(data.base_poster_url)
         const res = await fetch(data.base_poster_url)
         if (res.ok) {
           imageB64 = Buffer.from(await res.arrayBuffer()).toString('base64')
@@ -2225,6 +2329,7 @@ export const generatePosterImage = createServerFn({ method: 'POST' })
       }
       for (const url of assetUrls) {
         try {
+          assertAllowedImageUrl(url)
           const assetRes = await fetch(url)
           if (assetRes.ok) {
             carImages.push({
@@ -2243,6 +2348,7 @@ export const generatePosterImage = createServerFn({ method: 'POST' })
       const logoUrl = data.logo_url ?? null
       if (logoUrl) {
         try {
+          assertAllowedImageUrl(logoUrl)
           const logoRes = await fetch(logoUrl)
           if (logoRes.ok) {
             logoB64 = Buffer.from(await logoRes.arrayBuffer()).toString('base64')
@@ -2258,6 +2364,7 @@ export const generatePosterImage = createServerFn({ method: 'POST' })
       const logoUrl2 = data.logo_url_2 ?? null
       if (logoUrl2) {
         try {
+          assertAllowedImageUrl(logoUrl2)
           const logo2Res = await fetch(logoUrl2)
           if (logo2Res.ok) {
             logo2B64 = Buffer.from(await logo2Res.arrayBuffer()).toString('base64')

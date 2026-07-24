@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useMemo } from 'react'
+import { useState, useRef, useEffect, useMemo, cloneElement, isValidElement } from 'react'
 import { createFileRoute } from '@tanstack/react-router'
 import { getMediaAssets, deleteAsset, setAssetCampaignSelected, setAssetTrashed } from '#/lib/marketing'
 import type { MediaAsset } from '#/lib/types'
@@ -11,14 +11,34 @@ import {
   SlidersHorizontal, FileStack,
 } from 'lucide-react'
 import { cn } from '#/lib/utils'
+import { toast } from 'sonner'
+import { MarketingRouteError } from '#/components/marketing/RouteError'
 
 export const Route = createFileRoute('/_authed/marketing/media-library')({
-  loader: async () => ({
-    assets: await getMediaAssets({ data: {} }),
-    trashed: await getMediaAssets({ data: { trashed: true } }),
-  }),
+  loader: async () => {
+    // Same table, different filter, neither depends on the other — the two awaits
+    // ran back to back, so the page waited out both round trips in sequence.
+    const [assets, trashed] = await Promise.all([
+      getMediaAssets({ data: {} }),
+      getMediaAssets({ data: { trashed: true } }),
+    ])
+    return { assets, trashed }
+  },
   component: MediaLibrary,
+  pendingComponent: MediaLibrarySkeleton,
+  errorComponent: ({ reset }) => <MarketingRouteError title="Could not load the media library" reset={reset} />,
 })
+
+function MediaLibrarySkeleton() {
+  return (
+    <div className="space-y-6">
+      <div className="h-16 animate-pulse rounded-[14px] bg-muted" />
+      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+        {Array.from({ length: 8 }, (_, i) => <div key={i} className="aspect-square animate-pulse rounded-[14px] bg-muted" />)}
+      </div>
+    </div>
+  )
+}
 
 type AssetType = 'vehicle' | 'logo' | 'background' | 'brand_asset'
 type SortKey = 'newest' | 'oldest' | 'name'
@@ -46,6 +66,12 @@ const TYPE_META: Record<AssetType, { label: string; tone: string; badge: string;
 
 const FAV_KEY = 'adip.media.favorites'
 
+// Client-side upload gate — immediate feedback only. The real control is the same
+// pair of checks in `uploadAsset` (lib/marketing.ts); anything here is bypassable.
+// Kept in sync by hand: two constants, one caller each.
+const ALLOWED_UPLOAD_EXT = new Set(['png', 'jpg', 'jpeg', 'webp', 'gif'])
+const MAX_UPLOAD_BYTES = 15 * 1024 * 1024
+
 function fmtBytes(n?: number | null) {
   if (!n) return '—'
   if (n < 1024) return `${n} B`
@@ -54,7 +80,11 @@ function fmtBytes(n?: number | null) {
 }
 
 function isImage(url: string) {
-  return /\.(jpg|jpeg|png|gif|webp|svg|avif)$/i.test(url)
+  // SVG deliberately excluded: an inline-served SVG is an executable document
+  // (stored-XSS vector), so legacy SVGs already in the bucket are shown as a
+  // file icon, never previewed via <img src>. Uploads of SVG are already blocked
+  // server-side (uploadAsset). See S3.
+  return /\.(jpg|jpeg|png|gif|webp|avif)$/i.test(url)
 }
 
 function MediaLibrary() {
@@ -121,7 +151,20 @@ function MediaLibrary() {
   function clearCampaign() {
     const ids = [...campaignSel]
     setCampaignSel(new Set())
-    ids.forEach((id) => { void setAssetCampaignSelected({ data: { assetId: id, selected: false } }).catch(() => {}) })
+    // The per-write .catch(() => {}) here swallowed failures outright: the chip
+    // cleared locally while the row stayed flagged in Supabase and came back on
+    // reload. Put back only the ones whose write actually failed.
+    void Promise.allSettled(
+      ids.map((id) => setAssetCampaignSelected({ data: { assetId: id, selected: false } })),
+    ).then((results) => {
+      const failed = ids.filter((_, i) => results[i]?.status === 'rejected')
+      if (failed.length === 0) return
+      for (const r of results) {
+        if (r.status === 'rejected') console.error('[media-library] clear campaign selection failed', r.reason)
+      }
+      setCampaignSel((prev) => new Set([...prev, ...failed]))
+      toast.error(`Could not clear ${failed.length} asset${failed.length === 1 ? '' : 's'} from the campaign — please try again.`)
+    })
   }
   function dropFromCampaign(ids: string[]) {
     // Row is being trashed/deleted — just drop from the local set (flag goes with the row).
@@ -176,6 +219,18 @@ function MediaLibrary() {
 
   // ---- Upload ----
   function ingestFile(file: File) {
+    // Both the file picker and the drop zone route through here, so one gate covers
+    // both. The whole file is read into memory as base64 — an unbounded read was
+    // also the easiest way to hang this tab.
+    const ext = (file.name.split('.').pop() ?? '').toLowerCase()
+    if (!ALLOWED_UPLOAD_EXT.has(ext)) {
+      toast.error('Unsupported file type — upload a PNG, JPG, WEBP or GIF image.')
+      return
+    }
+    if (file.size > MAX_UPLOAD_BYTES) {
+      toast.error(`File is too large (${fmtBytes(file.size)}) — the limit is 15MB.`)
+      return
+    }
     const reader = new FileReader()
     reader.onload = () => {
       const b64 = (reader.result as string).split(',')[1] ?? ''
@@ -203,40 +258,76 @@ function MediaLibrary() {
 
   // ---- Soft delete → trash; permanent delete from trash ----
   // Both write deleted_at through to Supabase — otherwise a "deleted" asset comes
-  // back on the next load. Optimistic UI, reverted by a reload if the write fails.
+  // back on the next load. Optimistic UI, rolled back here if the write fails: a
+  // dropped write used to leave the row in Trash locally while it was still live
+  // on the server, so the next load silently resurrected it.
   function softDelete(ids: string[]) {
     const moving = assets.filter((a) => ids.includes(a.id))
+    const wasInCampaign = [...campaignSel].filter((x) => ids.includes(x))
     setTrashed((t) => [...moving, ...t])
     setAssets((prev) => prev.filter((a) => !ids.includes(a.id)))
     setSelected((s) => s.filter((x) => !ids.includes(x)))
     dropFromCampaign(ids)
     if (detail && ids.includes(detail.id)) setDetail(null)
-    void setAssetTrashed({ data: { assetIds: ids, trashed: true } })
+    setAssetTrashed({ data: { assetIds: ids, trashed: true } }).catch((err) => {
+      console.error('[media-library] move to trash failed', err)
+      setTrashed((t) => t.filter((a) => !ids.includes(a.id)))
+      setAssets((prev) => [...moving, ...prev])
+      setCampaignSel((prev) => new Set([...prev, ...wasInCampaign]))
+      toast.error(`Could not move ${ids.length === 1 ? 'the asset' : `${ids.length} assets`} to Trash — please try again.`)
+    })
   }
   function restore(ids: string[]) {
     const back = trashed.filter((a) => ids.includes(a.id))
     setAssets((prev) => [...back, ...prev])
     setTrashed((t) => t.filter((a) => !ids.includes(a.id)))
     setSelected((s) => s.filter((x) => !ids.includes(x)))
-    void setAssetTrashed({ data: { assetIds: ids, trashed: false } })
+    setAssetTrashed({ data: { assetIds: ids, trashed: false } }).catch((err) => {
+      console.error('[media-library] restore failed', err)
+      setAssets((prev) => prev.filter((a) => !ids.includes(a.id)))
+      setTrashed((t) => [...back, ...t])
+      toast.error(`Could not restore ${ids.length === 1 ? 'the asset' : `${ids.length} assets`} — please try again.`)
+    })
   }
   async function purge(ids: string[]) {
     setDeleting(true)
     try {
       const list = trashed.filter((a) => ids.includes(a.id))
-      await Promise.all(list.map((a) => deleteAsset({ data: { assetId: a.id, file_url: a.file_url } })))
-      setTrashed((t) => t.filter((a) => !ids.includes(a.id)))
-      setSelected((s) => s.filter((x) => !ids.includes(x)))
+      // allSettled, not all: a rejection used to abandon the remaining deletes
+      // mid-flight and drop nothing from the list, so rows already gone from the
+      // server kept showing in Trash and the failure was silent.
+      const results = await Promise.allSettled(
+        list.map((a) => deleteAsset({ data: { assetId: a.id, file_url: a.file_url } })),
+      )
+      const purged = list.filter((_, i) => results[i]?.status === 'fulfilled').map((a) => a.id)
+      const failed = results.length - purged.length
+      if (purged.length > 0) {
+        setTrashed((t) => t.filter((a) => !purged.includes(a.id)))
+        setSelected((s) => s.filter((x) => !purged.includes(x)))
+      }
+      if (failed > 0) {
+        for (const r of results) {
+          if (r.status === 'rejected') console.error('[media-library] permanent delete failed', r.reason)
+        }
+        toast.error(`Could not delete ${failed} asset${failed === 1 ? '' : 's'} — please try again.`)
+      }
     } finally {
       setDeleting(false)
     }
   }
 
-  function copyUrl(asset: MediaAsset) {
-    navigator.clipboard.writeText(asset.file_url).then(() => {
+  async function copyUrl(asset: MediaAsset) {
+    try {
+      await navigator.clipboard.writeText(asset.file_url)
       setCopiedId(asset.id)
       setTimeout(() => setCopiedId((c) => (c === asset.id ? null : c)), 1500)
-    })
+    } catch (err) {
+      // clipboard is undefined outside a secure context (throws synchronously) and
+      // writeText rejects when the document is unfocused or permission is denied.
+      // Neither was handled, so the copy button just did nothing at all.
+      console.error('[media-library] copy link failed', err)
+      toast.error('Could not copy the link — please copy it manually.')
+    }
   }
 
   const inTrash = view.kind === 'trash'
@@ -251,7 +342,7 @@ function MediaLibrary() {
         isFavorite={detail ? favorites.has(detail.id) : false}
         onToggleFavorite={toggleFavorite}
       />
-      <input ref={fileRef} type="file" accept="image/*,video/*,application/pdf" className="hidden" onChange={onFileChange} />
+      <input ref={fileRef} type="file" accept=".png,.jpg,.jpeg,.webp,.gif" className="hidden" onChange={onFileChange} />
 
       {/* ───────── Sidebar ───────── */}
       <aside className="w-60 shrink-0 border-r border-border bg-white/80 backdrop-blur-sm flex flex-col">
@@ -522,6 +613,23 @@ function AssetCard({ asset, index, selected, favorite, copied, inTrash, onToggle
   const image = isImage(asset.file_url)
   const meta = TYPE_META[asset.asset_type]
 
+  // Cross-origin <a download> is ignored (Supabase Storage is a different origin),
+  // so a click navigates to the file instead of saving it — and for a legacy SVG
+  // served inline that navigation is the XSS trigger. Supabase honors a `download`
+  // query param → Content-Disposition: attachment. Computed without `window` so
+  // SSR and client render the same href (no hydration mismatch); legacy relative
+  // URLs are same-origin and keep the plain download attribute. See S3 / M17.
+  const downloadHref = (() => {
+    if (!/^https?:\/\//i.test(asset.file_url)) return asset.file_url
+    try {
+      const u = new URL(asset.file_url)
+      u.searchParams.set('download', asset.name)
+      return u.toString()
+    } catch {
+      return asset.file_url
+    }
+  })()
+
   return (
     <div
       className={cn(
@@ -595,7 +703,7 @@ function AssetCard({ asset, index, selected, favorite, copied, inTrash, onToggle
           ) : (
             <>
               <ActionPill title="Download" onClick={(e) => { e.stopPropagation() }} asChild>
-                <a href={asset.file_url} download={asset.name} onClick={(e) => e.stopPropagation()}><Download className="h-3.5 w-3.5" /></a>
+                <a href={downloadHref} download={asset.name} onClick={(e) => e.stopPropagation()}><Download className="h-3.5 w-3.5" /></a>
               </ActionPill>
               <ActionPill title={copied ? 'Copied!' : 'Copy URL'} onClick={(e) => { e.stopPropagation(); onCopy() }}>
                 {copied ? <Check className="h-3.5 w-3.5 text-emerald-300" /> : <Copy className="h-3.5 w-3.5" />}
@@ -630,7 +738,16 @@ function ActionPill({ children, title, onClick, tone, asChild }: {
     'h-8 w-8 rounded-[10px] flex items-center justify-center backdrop-blur-sm transition-all hover:scale-110',
     tone === 'danger' ? 'bg-white/90 text-[var(--brand)] hover:bg-white' : 'bg-white/90 text-foreground hover:bg-white',
   )
-  if (asChild) return <span className={cls} title={title} onClick={onClick}>{children}</span>
+  // asChild renders the caller's element (e.g. a download <a>) AS the pill, so the
+  // element itself is the full-size, keyboard-focusable target — not a non-focusable
+  // <span> wrapper around a tiny icon. Child keeps its own onClick (it already stops
+  // propagation), so we merge styling/title only.
+  if (asChild && isValidElement<{ className?: string; title?: string }>(children)) {
+    return cloneElement(children, {
+      className: cn(cls, children.props.className),
+      title,
+    })
+  }
   return <button className={cls} title={title} onClick={onClick}>{children}</button>
 }
 

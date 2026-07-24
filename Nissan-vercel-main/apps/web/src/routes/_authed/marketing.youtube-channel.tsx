@@ -99,7 +99,10 @@ function YouTubeChannelPage() {
         setBanner({ type: 'error', message: res.error ?? 'Publish failed.' })
       }
     } catch (e) {
-      setBanner({ type: 'error', message: e instanceof Error ? e.message : 'Publish failed.' })
+      // The thrown text carries raw Supabase/FastAPI internals — banner gets a
+      // fixed string, the real cause goes to the console.
+      console.error('[youtube-channel] publish failed', e)
+      setBanner({ type: 'error', message: 'Could not publish the video — please try again.' })
     } finally {
       setPublishing(false)
     }

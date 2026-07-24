@@ -51,8 +51,12 @@ export function DashCard({
 // Compact number formatting — one implementation, used by every tile, axis,
 // table cell and funnel step on this page.
 export function compact(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`
+  // Compact by magnitude so negatives fold too (-1_500_000 → "-1.5M"); a bare
+  // n >= 1_000 test let negatives fall through to a full-length uncompacted number.
+  const abs = Math.abs(n)
+  const sign = n < 0 ? '-' : ''
+  if (abs >= 1_000_000) return `${sign}${(abs / 1_000_000).toFixed(1)}M`
+  if (abs >= 1_000) return `${sign}${(abs / 1_000).toFixed(1)}K`
   return n.toLocaleString('en-IN')
 }
 

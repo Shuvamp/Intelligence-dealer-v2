@@ -23,8 +23,6 @@ try {
   await page.click('button:has-text("Sign in")')
   await page.waitForURL('**/dashboard', { timeout: 20000 })
 
-  res.reportsSales = await check('/reports', 'Sales Performance', '16-reports.png')
-  res.reportsTeam = await page.locator('text=/Team Performance|Team/i').first().isVisible().catch(() => false)
   res.settings = await check('/settings', 'Subscription', '17-settings.png')
   res.price20 = await page.locator('text=$20').first().isVisible().catch(() => false)
   res.currentPlan = await page.locator('text=Current plan').first().isVisible().catch(() => false)

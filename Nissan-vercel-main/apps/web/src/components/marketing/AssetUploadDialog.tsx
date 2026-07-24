@@ -84,8 +84,9 @@ export function AssetUploadDialog({ open, onOpenChange, pendingFile, onUploaded 
           </div>
 
           <div className="space-y-1.5">
-            <label className="text-[11px] font-semibold text-foreground">Asset Name *</label>
+            <label htmlFor="asset-name" className="text-[11px] font-semibold text-foreground">Asset Name *</label>
             <input
+              id="asset-name"
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="e.g. Magnite Red Studio Shot"
@@ -94,8 +95,9 @@ export function AssetUploadDialog({ open, onOpenChange, pendingFile, onUploaded 
           </div>
 
           <div className="space-y-1.5">
-            <label className="text-[11px] font-semibold text-foreground">Asset Type *</label>
+            <label htmlFor="asset-type" className="text-[11px] font-semibold text-foreground">Asset Type *</label>
             <select
+              id="asset-type"
               value={assetType}
               onChange={(e) => setAssetType(e.target.value as typeof assetType)}
               className="w-full h-9 rounded-[10px] border border-border px-3 text-[12px] text-foreground focus:outline-none focus:border-[#C3002F] bg-white"
@@ -108,8 +110,9 @@ export function AssetUploadDialog({ open, onOpenChange, pendingFile, onUploaded 
 
           {assetType === 'vehicle' && (
             <div className="space-y-1.5">
-              <label className="text-[11px] font-semibold text-foreground">Vehicle *</label>
+              <label htmlFor="asset-vehicle" className="text-[11px] font-semibold text-foreground">Vehicle *</label>
               <select
+                id="asset-vehicle"
                 value={vehicle}
                 onChange={(e) => setVehicle(e.target.value)}
                 className="w-full h-9 rounded-[10px] border border-border px-3 text-[12px] text-foreground focus:outline-none focus:border-[#C3002F] bg-white"
@@ -121,8 +124,9 @@ export function AssetUploadDialog({ open, onOpenChange, pendingFile, onUploaded 
           )}
 
           <div className="space-y-1.5">
-            <label className="text-[11px] font-semibold text-foreground">Sub-category (optional)</label>
+            <label htmlFor="asset-subcategory" className="text-[11px] font-semibold text-foreground">Sub-category (optional)</label>
             <input
+              id="asset-subcategory"
               value={subCategory}
               onChange={(e) => setSubCategory(e.target.value)}
               placeholder="e.g. Studio, Lifestyle, Exterior..."

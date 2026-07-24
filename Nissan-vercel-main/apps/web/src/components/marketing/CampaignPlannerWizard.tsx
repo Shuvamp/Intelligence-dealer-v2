@@ -12,6 +12,7 @@ import { generateCampaignPlan, createCampaignFromPlan, getMediaAssets, suggestCa
 import type { CampaignGoal, CampaignPlanInput, CampaignPlanResult, CampaignType, MediaAsset, SelectedAsset } from '#/lib/types'
 import { cn } from '#/lib/utils'
 import { getVoiceProvider, type VoiceSession } from './voiceInput'
+import { to12hDisplay, parse12hInput } from './time12h'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -201,38 +202,8 @@ function CampaignSummaryView({ plan }: { plan: CampaignPlanResult }) {
 }
 
 // ─── Posting Time Picker (12-hour with AM/PM) ─────────────────────────────────
-
-// Converts internal 24h "HH:MM" to display "hh:mm AM/PM".
-function to12hDisplay(val: string): string {
-  const parts = (val || '10:00').split(':').map(Number)
-  const h24 = parts[0] ?? 10
-  const mm = String(parts[1] ?? 0).padStart(2, '0')
-  const ampm = h24 < 12 ? 'AM' : 'PM'
-  const h12 = String(h24 % 12 || 12).padStart(2, '0')
-  return `${h12}:${mm} ${ampm}`
-}
-
-// Parses "hh:mm AM/PM" (or bare "HH:MM") → 24h "HH:MM". Returns null if invalid.
-function parse12hInput(raw: string): string | null {
-  const s = raw.trim().toUpperCase()
-  const m12 = s.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/)
-  if (m12) {
-    let h = parseInt(m12[1]!, 10)
-    const mm = parseInt(m12[2]!, 10)
-    if (h < 1 || h > 12 || mm < 0 || mm > 59) return null
-    if (m12[3] === 'AM' && h === 12) h = 0
-    if (m12[3] === 'PM' && h !== 12) h += 12
-    return `${String(h).padStart(2, '0')}:${String(mm).padStart(2, '0')}`
-  }
-  const m24 = s.match(/^(\d{1,2}):(\d{2})$/)
-  if (m24) {
-    const h = parseInt(m24[1]!, 10)
-    const mm = parseInt(m24[2]!, 10)
-    if (h < 0 || h > 23 || mm < 0 || mm > 59) return null
-    return `${String(h).padStart(2, '0')}:${String(mm).padStart(2, '0')}`
-  }
-  return null
-}
+// to12hDisplay / parse12hInput moved to ./time12h (shared with the content
+// studio, which had a byte-for-byte copy). See M4.
 
 // Single text field — accepts "hh:mm AM/PM" or "HH:MM". Stores as 24h "HH:MM".
 function PostingTimePicker({ value, onChange }: { value: string; onChange: (v: string) => void }) {
@@ -398,8 +369,10 @@ export function CampaignPlannerWizard({ open, onOpenChange, defaultValues }: Pro
   const loadCampaignMedia = async () => {
     setMediaLoading(true)
     try {
-      const all = await getMediaAssets({ data: {} })
-      const picked = all.filter((a) => a.campaign_selected)
+      // Filtered in Postgres, not here — this used to pull the tenant's whole
+      // media library over the wire on every wizard open just to keep the
+      // handful of flagged rows.
+      const picked = await getMediaAssets({ data: { campaign_selected: true } })
       const vehicles = picked.filter((a) => a.asset_type === 'vehicle')
       const logos = picked
         .filter((a) => a.asset_type === 'logo')
@@ -604,8 +577,9 @@ export function CampaignPlannerWizard({ open, onOpenChange, defaultValues }: Pro
         return (
           <div className="space-y-4">
             <div>
-              <label className={labelClass}>Campaign Name <span className="text-[#C3002F]">*</span></label>
+              <label htmlFor="campaign-name" className={labelClass}>Campaign Name <span className="text-[#C3002F]">*</span></label>
               <input
+                id="campaign-name"
                 className={fieldClass}
                 value={form.campaign_name}
                 onChange={(e) => set('campaign_name', e.target.value)}
@@ -614,19 +588,19 @@ export function CampaignPlannerWizard({ open, onOpenChange, defaultValues }: Pro
               />
             </div>
             <div>
-              <label className={labelClass}>Campaign Type <span className="text-[#C3002F]">*</span></label>
-              <select className={fieldClass} value={form.campaign_type} onChange={(e) => set('campaign_type', e.target.value as CampaignType)}>
+              <label htmlFor="campaign-type" className={labelClass}>Campaign Type <span className="text-[#C3002F]">*</span></label>
+              <select id="campaign-type" className={fieldClass} value={form.campaign_type} onChange={(e) => set('campaign_type', e.target.value as CampaignType)}>
                 {CAMPAIGN_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
               </select>
             </div>
             <div className="grid grid-cols-3 gap-3">
               <div>
-                <label className={labelClass}>Start Date <span className="text-[#C3002F]">*</span></label>
-                <input type="date" className={fieldClass} value={form.start_date} onChange={(e) => set('start_date', e.target.value)} />
+                <label htmlFor="campaign-start-date" className={labelClass}>Start Date <span className="text-[#C3002F]">*</span></label>
+                <input id="campaign-start-date" type="date" className={fieldClass} value={form.start_date} onChange={(e) => set('start_date', e.target.value)} />
               </div>
               <div>
-                <label className={labelClass}>End Date <span className="text-[#C3002F]">*</span></label>
-                <input type="date" className={fieldClass} value={form.end_date} min={form.start_date} onChange={(e) => set('end_date', e.target.value)} />
+                <label htmlFor="campaign-end-date" className={labelClass}>End Date <span className="text-[#C3002F]">*</span></label>
+                <input id="campaign-end-date" type="date" className={fieldClass} value={form.end_date} min={form.start_date} onChange={(e) => set('end_date', e.target.value)} />
               </div>
               <div>
                 <label className={labelClass}>Posting Time</label>
@@ -672,8 +646,9 @@ export function CampaignPlannerWizard({ open, onOpenChange, defaultValues }: Pro
               ))}
             </div>
             <div className="pt-1">
-              <label className={labelClass}>Or describe your own goal</label>
+              <label htmlFor="campaign-goal-custom" className={labelClass}>Or describe your own goal</label>
               <textarea
+                id="campaign-goal-custom"
                 className={`${fieldClass} resize-none`}
                 rows={2}
                 value={(GOALS as readonly string[]).includes(form.goal) ? '' : form.goal}

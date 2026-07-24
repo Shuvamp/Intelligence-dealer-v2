@@ -20,6 +20,7 @@ import {
   ReachTrendChart, EngagementOverviewChart, ContentTypePerformance,
   BestTimeHeatmap, AudienceGrowthChart, EngagementFunnel,
 } from '#/components/marketing/dashboard/Charts'
+import { MarketingRouteError } from '#/components/marketing/RouteError'
 
 const PRESETS: ReadonlyArray<AnalyticsPreset> = [
   'today', 'last7', 'last30', 'this_month', 'last_month', 'this_year', 'custom',
@@ -37,7 +38,10 @@ export const Route = createFileRoute('/_authed/marketing/dashboard')({
   }),
   loaderDeps: ({ search }) => search,
   loader: async ({ deps }) => {
-    const connections = await getChannelStatus()
+    // getCampaigns takes nothing from the channel status, so it rides along with it
+    // instead of queueing behind a full round trip. Everything in the Promise.all
+    // below genuinely reads `effectiveChannel`, so that stage has to stay downstream.
+    const [connections, campaigns] = await Promise.all([getChannelStatus(), getCampaigns()])
     const connected = connections.filter((c) => c.status === 'connected').map((c) => c.channel)
     // Default channel: explicit choice wins; otherwise auto-focus the only
     // connected channel (e.g. LinkedIn-only), else All.
@@ -57,11 +61,10 @@ export const Route = createFileRoute('/_authed/marketing/dashboard')({
       to: new Date(start.getTime() - 1).toISOString(),
     }
     const fetchInstagram = effectiveChannel === 'instagram' || effectiveChannel === 'all'
-    const [analytics, linkedin, instagram, campaigns, prevAnalytics, prevInstagram] = await Promise.all([
+    const [analytics, linkedin, instagram, prevAnalytics, prevInstagram] = await Promise.all([
       getMarketingAnalytics({ data: { ...deps, channel: effectiveChannel } }),
       effectiveChannel === 'linkedin' ? getLinkedInInsights({ data: deps }) : Promise.resolve(null),
       fetchInstagram ? getInstagramInsights({ data: deps }) : Promise.resolve(null),
-      getCampaigns(),
       getMarketingAnalytics({ data: { ...prevRange, channel: effectiveChannel } }),
       fetchInstagram ? getInstagramInsights({ data: prevRange }) : Promise.resolve(null),
     ])
@@ -69,6 +72,7 @@ export const Route = createFileRoute('/_authed/marketing/dashboard')({
   },
   component: MarketingDashboard,
   pendingComponent: DashboardSkeleton,
+  errorComponent: ({ reset }) => <MarketingRouteError title="Could not load the marketing dashboard" reset={reset} />,
 })
 
 function DashboardSkeleton() {
@@ -102,9 +106,14 @@ function MarketingDashboard() {
   // Real-time: re-run the loader on an interval so live insight/post updates appear.
   // Note this only re-reads what the backend poller has already stored — use
   // "Refresh now" to pull fresh like/comment counts from Instagram immediately.
+  // A hidden tab kept polling forever, and this loader is the expensive one —
+  // up to five analytics calls per tick. Skip the tick while hidden, and re-run
+  // it once on refocus so a returning tab never shows stale numbers.
   useEffect(() => {
-    const id = setInterval(() => { void router.invalidate() }, 60_000)
-    return () => clearInterval(id)
+    const tick = () => { if (document.visibilityState === 'visible') void router.invalidate() }
+    const id = setInterval(tick, 60_000)
+    document.addEventListener('visibilitychange', tick)
+    return () => { clearInterval(id); document.removeEventListener('visibilitychange', tick) }
   }, [router])
 
   const [refreshing, setRefreshing] = useState(false)

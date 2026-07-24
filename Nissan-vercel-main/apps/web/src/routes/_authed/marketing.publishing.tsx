@@ -11,6 +11,7 @@ import {
 } from 'lucide-react'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '#/components/ui/dialog'
 import { cn } from '#/lib/utils'
+import { MarketingRouteError } from '#/components/marketing/RouteError'
 
 export const Route = createFileRoute('/_authed/marketing/publishing')({
   loader: async () => {
@@ -20,7 +21,23 @@ export const Route = createFileRoute('/_authed/marketing/publishing')({
     return { items, channels, campaigns }
   },
   component: Publishing,
+  pendingComponent: PublishingSkeleton,
+  errorComponent: ({ reset }) => <MarketingRouteError title="Could not load the publishing queue" reset={reset} />,
 })
+
+function PublishingSkeleton() {
+  return (
+    <div className="space-y-6">
+      <div className="h-16 animate-pulse rounded-[14px] bg-muted" />
+      <div className="grid grid-cols-3 gap-3">
+        {Array.from({ length: 3 }, (_, i) => <div key={i} className="h-20 animate-pulse rounded-[14px] bg-muted" />)}
+      </div>
+      <div className="space-y-3">
+        {Array.from({ length: 3 }, (_, i) => <div key={i} className="h-32 animate-pulse rounded-[14px] bg-muted" />)}
+      </div>
+    </div>
+  )
+}
 
 // Display metadata for the channels the publisher can target.
 const CHANNEL_META: Record<string, { label: string; color: string }> = {
@@ -124,15 +141,23 @@ function Publishing() {
   const [confirm, setConfirm] = useState<{ action: 'publish' | 'reject'; group: PubGroup } | null>(null)
   const [selectedPlatforms, setSelectedPlatforms] = useState<string[]>(connectedChannels)
   const [outcome, setOutcome] = useState<PublishOutcome | null>(null)
+  // A thrown reject/publish previously left only the spinner clearing, so a
+  // failed publish read as a successful one.
+  const [actionError, setActionError] = useState<{ action: 'reject' | 'publish'; title: string } | null>(null)
 
   const togglePlatform = (ch: string) =>
     setSelectedPlatforms((prev) => (prev.includes(ch) ? prev.filter((p) => p !== ch) : [...prev, ch]))
 
   // The backend auto-publisher flips due posts every ~60s; refetch on the same
   // cadence so Scheduled → Published moves appear without a manual reload.
+  // A hidden tab kept polling forever, so every backgrounded tab held a loader
+  // round trip a minute. Skip the tick while hidden, and re-run it once on
+  // refocus so a returning tab never shows a stale queue.
   useEffect(() => {
-    const id = setInterval(() => { void router.invalidate() }, 60_000)
-    return () => clearInterval(id)
+    const tick = () => { if (document.visibilityState === 'visible') void router.invalidate() }
+    const id = setInterval(tick, 60_000)
+    document.addEventListener('visibilitychange', tick)
+    return () => { clearInterval(id); document.removeEventListener('visibilitychange', tick) }
   }, [router])
 
   // Channels a group publishes to: the campaign's linked channels (or every
@@ -180,12 +205,21 @@ function Publishing() {
         await router.invalidate()
         setOutcome({ title: g.title, postCount: res.postCount, perChannel: res.perChannel })
       }
+    } catch (err) {
+      // Real cause stays in the console; the dialog shows a stable generic string.
+      console.error(`[publishing] ${action} failed for ${g.kind} ${g.group_id}`, err)
+      setActionError({ action, title: g.title })
     } finally {
       setBusy(null)
     }
   }
 
-  const GroupCard = ({ g, showActions }: { g: PubGroup; showActions: boolean }) => {
+  // Called as a plain function, not rendered as <GroupCard/>. It used to be a
+  // component declared in this body, so its type was a brand-new function on
+  // every render and React unmounted + remounted all four lists each time the
+  // 60s refetch landed or `busy` flipped. Returning the JSX inline keeps the
+  // root <div> as a stable element type, so it reconciles instead.
+  const renderGroupCard = (g: PubGroup, showActions: boolean) => {
     const due = isGroupDue(g)
     const publishKey = `publish_${g.kind}_${g.group_id}`
     const rejectKey = `reject_${g.kind}_${g.group_id}`
@@ -195,7 +229,7 @@ function Publishing() {
     const groupCanPublish = hasConnected && targets.length > 0
 
     return (
-      <div className="rounded-[14px] border border-border bg-white overflow-hidden">
+      <div key={`${g.kind}_${g.group_id}`} className="rounded-[14px] border border-border bg-white overflow-hidden">
         {/* Group header */}
         <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-border bg-muted/20">
           <div className="flex items-center gap-2 min-w-0">
@@ -430,7 +464,7 @@ function Publishing() {
           </div>
         ) : (
           <div className="space-y-3">
-            {queued.map((g) => <GroupCard key={`${g.kind}_${g.group_id}`} g={g} showActions />)}
+            {queued.map((g) => renderGroupCard(g, true))}
           </div>
         )}
       </div>
@@ -445,7 +479,7 @@ function Publishing() {
           <p className="text-[12px] text-muted-foreground">Nothing published yet.</p>
         ) : (
           <div className="space-y-3">
-            {published.map((g) => <GroupCard key={`${g.kind}_${g.group_id}`} g={g} showActions={false} />)}
+            {published.map((g) => renderGroupCard(g, false))}
           </div>
         )}
       </div>
@@ -462,7 +496,7 @@ function Publishing() {
             Nothing was published — fix the issue in Content Studio (e.g. attach a video for YouTube) and re-approve.
           </p>
           <div className="space-y-3">
-            {failed.map((g) => <GroupCard key={`${g.kind}_${g.group_id}`} g={g} showActions={false} />)}
+            {failed.map((g) => renderGroupCard(g, false))}
           </div>
         </div>
       )}
@@ -475,7 +509,7 @@ function Publishing() {
             <h2 className="text-[15px] font-bold text-foreground">Rejected</h2>
           </div>
           <div className="space-y-3 opacity-70">
-            {rejected.map((g) => <GroupCard key={`${g.kind}_${g.group_id}`} g={g} showActions={false} />)}
+            {rejected.map((g) => renderGroupCard(g, false))}
           </div>
         </div>
       )}
@@ -604,6 +638,37 @@ function Publishing() {
                   className="rounded-[10px] bg-[#C3002F] px-4 py-2 text-[12px] font-semibold text-white hover:bg-[#a50027] transition"
                 >
                   Done
+                </button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Action failure — the request threw, so nothing was published or rejected */}
+      <Dialog open={actionError !== null} onOpenChange={(v) => { if (!v) setActionError(null) }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-[15px]">
+              <AlertCircle className="h-4 w-4 text-red-600" />
+              {actionError?.action === 'reject' ? 'Reject failed' : 'Publish failed'}
+            </DialogTitle>
+            <DialogDescription className="sr-only">
+              The request did not complete. Nothing was changed.
+            </DialogDescription>
+          </DialogHeader>
+          {actionError && (
+            <div className="space-y-4">
+              <p className="text-[13px] text-foreground leading-relaxed">
+                Could not {actionError.action === 'reject' ? 'reject' : 'publish'}{' '}
+                <span className="font-semibold">{actionError.title}</span>. Nothing was changed — please try again.
+              </p>
+              <div className="flex justify-end">
+                <button
+                  onClick={() => setActionError(null)}
+                  className="rounded-[10px] bg-[#C3002F] px-4 py-2 text-[12px] font-semibold text-white hover:bg-[#a50027] transition"
+                >
+                  Close
                 </button>
               </div>
             </div>

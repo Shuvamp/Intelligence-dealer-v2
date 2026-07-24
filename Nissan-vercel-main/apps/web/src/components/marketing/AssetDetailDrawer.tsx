@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { MediaAsset } from '#/lib/types'
 import {
   X, Download, Copy, Check, Trash2, Star, Calendar, HardDrive,
@@ -28,7 +28,10 @@ function fmtBytes(n?: number | null) {
 }
 
 function isImage(url: string) {
-  return /\.(jpg|jpeg|png|gif|webp|svg|avif)$/i.test(url)
+  // SVG deliberately excluded — an inline-served SVG is an executable document
+  // (stored-XSS vector); legacy SVGs render as the non-image placeholder instead
+  // of via <img src>. New SVG uploads are already blocked server-side. See S3.
+  return /\.(jpg|jpeg|png|gif|webp|avif)$/i.test(url)
 }
 
 interface Props {
@@ -43,6 +46,8 @@ export function AssetDetailDrawer({ asset, onClose, onDelete, isFavorite, onTogg
   const [copied, setCopied] = useState(false)
   const [dims, setDims] = useState<{ w: number; h: number } | null>(null)
   const [imgLoaded, setImgLoaded] = useState(false)
+  const drawerRef = useRef<HTMLElement>(null)
+  const openerRef = useRef<HTMLElement | null>(null)
 
   useEffect(() => {
     setCopied(false)
@@ -50,13 +55,47 @@ export function AssetDetailDrawer({ asset, onClose, onDelete, isFavorite, onTogg
     setImgLoaded(false)
   }, [asset?.id])
 
-  // Close on Escape
+  // Focus management + keyboard: Escape closes, Tab is trapped inside the drawer,
+  // and focus returns to whatever opened it when it closes. Keyed on open-state,
+  // not asset id, so switching assets doesn't re-capture the opener or re-run the
+  // trap setup.
+  const isOpen = asset !== null
   useEffect(() => {
-    if (!asset) return
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    if (!isOpen) return
+    openerRef.current = document.activeElement as HTMLElement | null
+
+    const focusables = () =>
+      Array.from(
+        drawerRef.current?.querySelectorAll<HTMLElement>(
+          'a[href], button:not([disabled]), textarea, input, select, [tabindex]:not([tabindex="-1"])',
+        ) ?? [],
+      )
+
+    // Move focus into the drawer so the trap has an anchor and screen readers land here.
+    focusables()[0]?.focus()
+
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { onClose(); return }
+      if (e.key !== 'Tab') return
+      const items = focusables()
+      if (items.length === 0) return
+      const first = items[0]
+      const last = items[items.length - 1]
+      const active = document.activeElement
+      if (e.shiftKey && (active === first || !drawerRef.current?.contains(active))) {
+        e.preventDefault()
+        last.focus()
+      } else if (!e.shiftKey && active === last) {
+        e.preventDefault()
+        first.focus()
+      }
+    }
     window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [asset, onClose])
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      openerRef.current?.focus()
+    }
+  }, [isOpen, onClose])
 
   if (!asset) return null
 
@@ -75,6 +114,21 @@ export function AssetDetailDrawer({ asset, onClose, onDelete, isFavorite, onTogg
     })
   }
 
+  // The <a download> attribute is ignored for cross-origin URLs, and Supabase
+  // Storage serves from a different origin — so the footer link just opened the
+  // file instead of saving it. Supabase honors a `download` query param to send
+  // Content-Disposition: attachment; on same-origin/legacy URLs it's an inert
+  // extra param and the download attribute still applies.
+  const downloadUrl = (() => {
+    try {
+      const u = new URL(absoluteUrl)
+      u.searchParams.set('download', asset.name)
+      return u.toString()
+    } catch {
+      return absoluteUrl
+    }
+  })()
+
   return (
     <div className="fixed inset-0 z-50 flex justify-end">
       {/* Scrim */}
@@ -86,6 +140,10 @@ export function AssetDetailDrawer({ asset, onClose, onDelete, isFavorite, onTogg
 
       {/* Drawer */}
       <aside
+        ref={drawerRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label={asset.name}
         className="relative w-full max-w-[440px] h-full bg-white shadow-float border-l border-border flex flex-col"
         style={{ animation: 'fade-up 320ms cubic-bezier(0.16,1,0.3,1) both' }}
       >
@@ -205,7 +263,7 @@ export function AssetDetailDrawer({ asset, onClose, onDelete, isFavorite, onTogg
         {/* Footer actions */}
         <div className="border-t border-border px-5 py-3 flex items-center gap-2 shrink-0">
           <a
-            href={asset.file_url}
+            href={downloadUrl}
             download={asset.name}
             className="flex-1 inline-flex items-center justify-center gap-2 h-10 rounded-[12px] brand-bg text-[13px] font-semibold hover:opacity-90 transition"
           >

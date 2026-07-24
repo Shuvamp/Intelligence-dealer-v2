@@ -25,8 +25,8 @@ export const PLANS: Array<PlanInfo> = [
     name: 'Growth',
     price: '$10',
     tagline: 'Add AI marketing automation.',
-    modules: ['Dashboard', 'Customers', 'Leads', 'Marketing', 'Reports'],
-    features: ['Everything in Starter', 'Marketing command center', 'AI content & posters', 'Approval & publishing', 'Reports'],
+    modules: ['Dashboard', 'Customers', 'Leads', 'Marketing'],
+    features: ['Everything in Starter', 'Marketing command center', 'AI content & posters', 'Approval & publishing'],
     highlight: true,
   },
   {
@@ -34,7 +34,7 @@ export const PLANS: Array<PlanInfo> = [
     name: 'Intelligence',
     price: '$20',
     tagline: 'Full intelligence + executive copilot.',
-    modules: ['Dashboard', 'Customers', 'Leads', 'Marketing', 'Intelligence', 'Copilot', 'Reports'],
+    modules: ['Dashboard', 'Customers', 'Leads', 'Marketing', 'Intelligence', 'Copilot'],
     features: ['Everything in Growth', 'Market intelligence & signals', 'Executive Copilot', 'AI recommendations'],
   },
   {

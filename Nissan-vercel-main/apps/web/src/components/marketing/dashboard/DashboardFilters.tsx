@@ -14,6 +14,7 @@ function Select({ value, onChange, options, placeholder }: {
     <select
       value={value}
       onChange={(e) => onChange(e.target.value)}
+      aria-label={placeholder}
       className="rounded-[10px] border border-[#E5E7EB] bg-white px-3 py-2 text-[12px] font-medium text-[#1A1A1A] outline-none transition-colors hover:border-[#C3002F] focus:border-[#C3002F]"
     >
       <option value="">{placeholder}</option>

@@ -651,30 +651,6 @@ export interface PublishNotification {
   missing: Array<{ channel: string; message: string | null }> // connected but not published to
 }
 
-// ---- Reports ----
-
-export interface ReportsData {
-  sales: {
-    totalLeads: number
-    won: number
-    lost: number
-    conversionRate: number // %
-    pipelineValue: number
-    wonValue: number
-  }
-  sources: Array<{ source: LeadSource; count: number; won: number; conversionRate: number }>
-  campaigns: Array<{ name: string; leads: number; conversionRate: number; costPerLead: number; spend: number }>
-  team: Array<{
-    name: string
-    role: UserRole | null
-    total: number
-    won: number
-    hot: number
-    conversionRate: number
-    pipelineValue: number
-  }>
-}
-
 // ---- Subscription / account ----
 
 export interface AccountUsage {

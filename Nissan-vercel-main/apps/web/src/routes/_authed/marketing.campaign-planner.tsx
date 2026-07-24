@@ -4,11 +4,13 @@ import { getDuckCampaigns, getDuckCampaignDays, getMonthEvents } from '#/lib/mar
 import { Zap, ChevronLeft, ChevronRight, Loader2 } from 'lucide-react'
 import type { CampaignDay, CampaignPlanInput, CampaignSummary, MonthPlan } from '#/lib/types'
 import { CampaignPlannerWizard } from '#/components/marketing/CampaignPlannerWizard'
+import { MarketingRouteError } from '#/components/marketing/RouteError'
 import { CampaignDetailDialog } from '#/components/marketing/CampaignDetailDialog'
 import { Calendar, dateFnsLocalizer, Views } from 'react-big-calendar'
 import { format, parse, startOfWeek, getDay } from 'date-fns'
 import { enUS } from 'date-fns/locale'
 import { cn } from '#/lib/utils'
+import { toast } from 'sonner'
 import 'react-big-calendar/lib/css/react-big-calendar.css'
 import '#/components/marketing/rbc-overrides.css'
 
@@ -25,6 +27,7 @@ export const Route = createFileRoute('/_authed/marketing/campaign-planner')({
     return { campaigns, campaignDays, calendar: [] as import('#/lib/types').CampaignPost[], monthPlan, currentMonth, currentYear }
   },
   component: CampaignPlanner,
+  errorComponent: ({ reset }) => <MarketingRouteError title="Could not load the campaign planner" reset={reset} />,
 })
 
 // ── react-big-calendar setup ──────────────────────────────────────────────────
@@ -143,7 +146,9 @@ function CampaignPlanner() {
         return Array.from({ length: totalDays }, (_, i) => {
           const day = new Date(start)
           day.setDate(day.getDate() + i)
-          const dateStr = day.toISOString().substring(0, 10)
+          // `day` is local midnight; toISOString() would shift it a day back in
+          // any UTC+ zone (IST = UTC+5:30) and miss the local-dated dayInfoMap key.
+          const dateStr = format(day, 'yyyy-MM-dd')
           const info = dayInfoMap[`${c.id}-${dateStr}`]
           const theme = info?.theme ?? null
           const vehicle = info?.vehicle ?? null
@@ -206,6 +211,12 @@ function CampaignPlanner() {
       setMonth(newMonth)
       setYear(newYear)
       setMonthPlan(plan)
+    } catch (err) {
+      // Callers don't await navigateTo, so a rejection here used to surface only as
+      // an unhandled promise rejection while the view sat on the old month with no
+      // feedback. Keep the old month, tell the user, log for triage.
+      console.error('[campaign-planner] getMonthEvents failed:', err)
+      toast.error('Could not load that month. Please try again.')
     } finally {
       setLoadingPlan(false)
     }
@@ -478,7 +489,7 @@ function CampaignPlanner() {
           setCampaignDays((prev) => prev.filter((d) => d.campaign_id !== id))
           setDetailCampaign(null)
           setDetailOpen(false)
-          router.invalidate()
+          void router.invalidate()
         }}
       />
     </div>

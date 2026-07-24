@@ -94,8 +94,17 @@ const browserVoiceProvider: VoiceProvider = {
     recognition.onerror = (e: SpeechRecognitionErrorEvent) => cb.onError?.(e.error)
     recognition.onend = () => cb.onEnd?.()
 
-    recognition.start()
-    cb.onStart?.()
+    // start() throws InvalidStateError if the recognizer is already running (a
+    // fast double-tap on the mic). stop() was guarded; start() wasn't, so the
+    // second call took down the caller. Report it like any other voice error and
+    // don't fire onStart, since nothing new actually started.
+    try {
+      recognition.start()
+      cb.onStart?.()
+    } catch (e) {
+      cb.onError?.(e instanceof Error ? e.name : 'start-failed')
+      return { stop: () => {} }
+    }
 
     return {
       stop: () => {
