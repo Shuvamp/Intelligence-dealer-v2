@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import { createFileRoute, Link } from '@tanstack/react-router'
 import { Car, ArrowLeft, CheckCircle2, Loader2, Sparkles } from 'lucide-react'
-import { submitLead, type LeadInput } from '#/lib/intake'
+import { submitLead } from '#/lib/intake'
+import type { LeadInput } from '#/lib/intake'
 import { Button } from '#/components/ui/kit'
 
 export const Route = createFileRoute('/enquire')({
@@ -11,6 +12,7 @@ export const Route = createFileRoute('/enquire')({
 const VEHICLES = [
   'Nissan Magnite',
   'Nissan Kicks',
+  'Nissan Tekton',
   'Nissan X-Trail',
   'Nissan Terrano',
   'Nissan Sunny',
@@ -45,6 +47,7 @@ const CONTACT_MEDIUM = ['WhatsApp', 'Phone call', 'Email', 'SMS']
 const VEHICLE_PRICE: Record<string, string> = {
   'Nissan Magnite': '₹6 – 11 Lakh',
   'Nissan Kicks': '₹10 – 16 Lakh',
+  'Nissan Tekton': 'Price details on request',
   'Nissan X-Trail': '₹36 – 50 Lakh',
   'Nissan Terrano': '₹10 – 16 Lakh',
   'Nissan Sunny': '₹9 – 14 Lakh',

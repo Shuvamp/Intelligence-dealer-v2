@@ -93,6 +93,41 @@ def _brand_note(consideration, brands) -> str:
     return ""
 
 
+def _signal_summary(
+    *,
+    source: str,
+    vehicle: str | None,
+    budget: str,
+    timeline: str,
+    callback: str,
+    contact: str,
+    financing: str,
+    relationship: str,
+    brand: str,
+    reason: str,
+) -> str:
+    lines = [f"Source: {source or 'unspecified'}."]
+    if vehicle:
+        lines.append(f"Vehicle interest: {vehicle}.")
+    if budget:
+        lines.append(f"Budget: {budget}.")
+    if timeline:
+        lines.append(f"Timeline: {timeline}.")
+    if callback:
+        lines.append(f"Callback: {callback}.")
+    if contact:
+        lines.append(f"Preferred contact: {contact}.")
+    if financing:
+        lines.append(f"Financing: {financing}.")
+    if relationship:
+        lines.append(f"Relationship: {relationship}.")
+    if brand:
+        lines.append(f"Brand consideration: {brand}.")
+    if reason:
+        lines.append(f"Purchase reason: {reason}.")
+    return " ".join(lines)
+
+
 def normalized_to_scoring_input(lead: dict) -> dict:
     """
     lead = the pipeline's NormalizedLead (name/phone/email/vehicle/city/
@@ -151,6 +186,27 @@ def normalized_to_scoring_input(lead: dict) -> dict:
     if reason:
         notes.append(reason)
 
+    callback_note = ""
+    if cb is not None:
+        try:
+            if int(cb) <= 2:
+                callback_note = "Asked for a quick callback."
+        except (TypeError, ValueError):
+            pass
+
+    signal_summary = _signal_summary(
+        source=SOURCE_NOTE.get(src, src or "unspecified"),
+        vehicle=lead.get("vehicle"),
+        budget=b or "",
+        timeline=t or "",
+        callback=callback_note,
+        contact=medium or "",
+        financing=fin or "",
+        relationship=rel or "",
+        brand=brand or "",
+        reason=reason or "",
+    )
+
     interaction_type = "walk_in" if src == "walk_in" else "inbound_call"
 
     return {
@@ -169,6 +225,7 @@ def normalized_to_scoring_input(lead: dict) -> dict:
         "call_recordings":  [],
         "whatsapp_log":     [],
         "website_analytics": {},
+        "signal_summary":   signal_summary,
         "missing_data_flags": [],
         "validation_flags":   [],
         "strengths":          [],
